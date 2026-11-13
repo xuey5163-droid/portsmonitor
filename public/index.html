@@ -273,22 +273,85 @@
     }
   });
 
+  // Export one consolidated row per MMSI, keeping the newest position
+  // when the same vessel was received from more than one provider.
   $("export").addEventListener("click", () => {
-    if (!lastResults) return;
-    const header = ["Provider","MMSI","Vessel","Latitude","Longitude","Speed_knots","Updates","FirstSeen","LastSeen"];
-    const rows = [header, ...vesselRows.map(v => [
-      v.provider, v.mmsi, v.name, v.lat ?? "", v.lon ?? "", v.speed ?? "",
-      v.updates, v.firstSeen, v.lastSeen
+    if (!lastResults || vesselRows.length === 0) return;
+
+    const byMmsi = new Map();
+    for (const vessel of vesselRows) {
+      const mmsi = String(vessel.mmsi ?? "").trim();
+      if (!mmsi) continue;
+
+      const current = byMmsi.get(mmsi);
+      const seenAt = Date.parse(vessel.lastSeen || "") || 0;
+      const currentSeenAt = current
+        ? (Date.parse(current.lastSeen || "") || 0)
+        : -1;
+
+      if (!current) {
+        byMmsi.set(mmsi, {
+          ...vessel,
+          sources: new Set([vessel.provider])
+        });
+      } else {
+        current.sources.add(vessel.provider);
+        current.updates += Number(vessel.updates || 0);
+        const firstSeen = [current.firstSeen, vessel.firstSeen]
+          .filter(Boolean).sort()[0] || "";
+        current.firstSeen = firstSeen;
+
+        if (seenAt >= currentSeenAt) {
+          const sources = current.sources;
+          const totalUpdates = current.updates;
+          const earliest = current.firstSeen;
+          Object.assign(current, vessel);
+          current.sources = sources;
+          current.updates = totalUpdates;
+          current.firstSeen = earliest;
+        }
+      }
+    }
+
+    const header = [
+      "MMSI", "Vessel", "Latitude", "Longitude", "Speed_knots",
+      "Data_Sources", "Latest_Source", "Updates",
+      "First_Seen_UTC", "Last_Seen_UTC"
+    ];
+
+    const csvCell = (value) => {
+      let text = String(value ?? "");
+      // Reduce spreadsheet formula-injection risk for text fields.
+      if (/^[=+@\\-\\t\\r]/.test(text)) text = "'" + text;
+      return '"' + text.replace(/"/g, '""') + '"';
+    };
+
+    const rows = [header, ...[...byMmsi.values()].map(v => [
+      v.mmsi,
+      v.name,
+      v.lat ?? "",
+      v.lon ?? "",
+      v.speed ?? "",
+      [...v.sources].sort().join("; "),
+      v.provider,
+      v.updates,
+      v.firstSeen ?? "",
+      v.lastSeen ?? ""
     ])];
-    const csv = rows.map(row => row.map(value =>
-      '"' + String(value ?? "").replace(/"/g, '""') + '"'
-    ).join(",")).join("\\r\\n");
-    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+
+    // CRLF creates real CSV rows; BOM helps Excel recognize UTF-8 correctly.
+    const csv = "\\uFEFF" + rows
+      .map(row => row.map(csvCell).join(","))
+      .join("\\r\\n");
+
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
-    a.download = `ais-benchmark-${lastResults.portKey}-${Date.now()}.csv`;
+    a.download = `ais-vessels-${lastResults.portKey}-${Date.now()}.csv`;
+    document.body.appendChild(a);
     a.click();
+    a.remove();
     URL.revokeObjectURL(url);
   });
 </script>
