@@ -1,0 +1,338 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Global Port & Fleet — Disruption Monitor</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { color-scheme: dark; --bg:#0b1220; --panel:#111c2e; --muted:#91a2ba; --line:#26364d; --accent:#38bdf8;
+            --high:#ef4444; --med:#f59e0b; --low:#34d399; --unknown:#94a3b8; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,Segoe UI,Arial,sans-serif; background:var(--bg); color:#e8eef7; }
+    header { padding:18px 26px; border-bottom:1px solid var(--line); background:#0e1929; display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
+    header h1 { margin:0 0 4px; font-size:20px; }
+    header p { margin:0; color:var(--muted); font-size:12px; }
+    .nav { margin-left:auto; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+    .nav a, .nav button { min-height:34px; display:inline-flex; align-items:center; border-radius:8px; border:1px solid #34465f;
+      padding:0 12px; background:#17263b; color:#eef6ff; font-size:12px; text-decoration:none; cursor:pointer; font-family:inherit; font-weight:600; }
+    .nav a.primary, .nav button.primary { background:#0284c7; border-color:#0284c7; }
+    .nav button:disabled { opacity:.5; cursor:not-allowed; }
+    main { padding:16px 20px; max-width:1600px; margin:auto; }
+    .kpis { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+    .kpi { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:13px 15px; }
+    .kpi .name { color:var(--muted); font-size:11px; }
+    .kpi .value { font-size:25px; font-weight:700; margin-top:5px; }
+    .kpi .value.high { color:var(--high); }
+    .kpi .sub { color:var(--muted); font-size:11px; margin-top:3px; }
+    .layout { display:grid; grid-template-columns:340px minmax(0,1fr); gap:14px; }
+    .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; display:flex; flex-direction:column; }
+    .filters { padding:12px; border-bottom:1px solid var(--line); display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+    .filters .wide { grid-column:1 / -1; }
+    label { display:block; color:var(--muted); font-size:11px; margin-bottom:4px; }
+    select, input[type="search"] { width:100%; min-height:34px; border-radius:8px; border:1px solid #34465f; padding:0 10px; background:#17263b; color:#eef6ff; font-size:12px; font-family:inherit; }
+    .list-head { padding:10px 12px; color:var(--muted); font-size:11px; border-bottom:1px solid var(--line); display:flex; justify-content:space-between; }
+    .event-list { overflow-y:auto; max-height:52vh; }
+    .event-item { padding:11px 12px; border-bottom:1px solid var(--line); cursor:pointer; }
+    .event-item:hover { background:#16233a; }
+    .event-item.selected { background:#1b2f4d; border-left:3px solid var(--accent); padding-left:9px; }
+    .event-item .t { font-size:13px; font-weight:600; display:flex; gap:8px; align-items:center; }
+    .event-item .m { color:var(--muted); font-size:11px; margin-top:4px; }
+    .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+    .dot.HIGH { background:var(--high); } .dot.MEDIUM { background:var(--med); }
+    .dot.LOW { background:var(--low); } .dot.UNKNOWN { background:var(--unknown); }
+    .badge { font-size:10px; border:1px solid #34465f; border-radius:20px; padding:1px 8px; color:var(--muted); white-space:nowrap; }
+    .map-wrap { position:relative; }
+    #map { height:calc(100vh - 320px); min-height:480px; border-radius:12px; border:1px solid var(--line); }
+    .legend { position:absolute; bottom:12px; left:12px; z-index:500; background:rgba(13,23,39,.92); border:1px solid var(--line);
+      border-radius:8px; padding:8px 12px; font-size:11px; color:var(--muted); line-height:1.9; }
+    .legend .dot { display:inline-block; margin-right:6px; }
+    .detail { position:absolute; top:12px; right:12px; z-index:500; width:330px; max-height:calc(100% - 24px); overflow-y:auto;
+      background:rgba(14,25,41,.96); border:1px solid var(--line); border-radius:12px; padding:14px 16px; display:none; }
+    .detail.open { display:block; }
+    .detail h3 { margin:0 32px 4px 0; font-size:15px; }
+    .detail .close { position:absolute; top:8px; right:10px; background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; }
+    .detail .sub { color:var(--muted); font-size:11px; margin-bottom:10px; }
+    .detail .sev { font-size:10px; font-weight:700; border-radius:20px; padding:2px 10px; display:inline-block; margin-bottom:10px; }
+    .sev.HIGH { background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.4); }
+    .sev.MEDIUM { background:rgba(245,158,11,.15); color:#fcd34d; border:1px solid rgba(245,158,11,.4); }
+    .sev.LOW { background:rgba(52,211,153,.15); color:#6ee7b7; border:1px solid rgba(52,211,153,.4); }
+    .sev.UNKNOWN { background:rgba(148,163,184,.12); color:#cbd5e1; border:1px solid rgba(148,163,184,.35); }
+    .kv { display:grid; grid-template-columns:110px 1fr; gap:5px 10px; font-size:12px; margin-bottom:10px; }
+    .kv dt { color:var(--muted); } .kv dd { margin:0; word-break:break-word; }
+    .detail a { color:var(--accent); font-size:12px; word-break:break-all; }
+    .detail .note { color:var(--muted); font-size:11px; line-height:1.5; border-top:1px solid var(--line); padding-top:10px; }
+    .statusbar { padding:9px 12px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
+    .src-ok { color:#6ee7b7; } .src-err { color:#fca5a5; }
+    footer { padding:16px 20px; color:var(--muted); font-size:11px; text-align:center; }
+    @media(max-width:1000px) { .layout { grid-template-columns:1fr; } .kpis { grid-template-columns:repeat(3,1fr); } #map { height:52vh; min-height:380px; } }
+    @media(max-width:560px) { .kpis { grid-template-columns:repeat(2,1fr); } .detail { width:calc(100% - 24px); } }
+  </style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Disruption Monitor</h1>
+    <p>Global maritime disruption events · USGS &amp; GDACS · Phase 1 live feed</p>
+  </div>
+  <nav class="nav">
+    <a href="/" title="AIS provider benchmark">← AIS Benchmark</a>
+    <select id="days" title="GDACS lookback window">
+      <option value="7">Last 7 days</option>
+      <option value="30" selected>Last 30 days</option>
+      <option value="90">Last 90 days</option>
+    </select>
+    <select id="usgsFeed" title="USGS feed">
+      <option value="magnitude45" selected>USGS M4.5+ week</option>
+      <option value="significant">USGS significant</option>
+    </select>
+    <label style="display:flex;align-items:center;gap:5px;margin:0;color:#eef6ff;font-size:12px;">
+      <input type="checkbox" id="autoRefresh" checked> Auto-refresh 5 min
+    </label>
+    <button class="primary" id="refresh">Refresh now</button>
+  </nav>
+</header>
+<main>
+  <section class="kpis">
+    <div class="kpi"><div class="name">Total events</div><div class="value" id="kTotal">—</div><div class="sub" id="kTotalSub">—</div></div>
+    <div class="kpi"><div class="name">High severity</div><div class="value high" id="kHigh">—</div><div class="sub">Internal display category</div></div>
+    <div class="kpi"><div class="name">Earthquakes</div><div class="value" id="kEq">—</div><div class="sub" id="kEqSub">—</div></div>
+    <div class="kpi"><div class="name">Storms &amp; floods</div><div class="value" id="kStorm">—</div><div class="sub">TC / FL / VO / DR / WF</div></div>
+    <div class="kpi"><div class="name">Sources online</div><div class="value" id="kSources">—</div><div class="sub" id="kSourcesSub">—</div></div>
+  </section>
+
+  <section class="layout">
+    <div class="panel">
+      <div class="filters">
+        <div><label for="fType">Event type</label>
+          <select id="fType">
+            <option value="">All types</option>
+            <option value="EARTHQUAKE">Earthquake</option>
+            <option value="TROPICAL_CYCLONE">Tropical cyclone</option>
+            <option value="FLOOD">Flood</option>
+            <option value="VOLCANO">Volcano</option>
+            <option value="DROUGHT">Drought</option>
+            <option value="WILDFIRE">Wildfire</option>
+            <option value="OTHER">Other</option>
+          </select>
+        </div>
+        <div><label for="fSev">Severity</label>
+          <select id="fSev">
+            <option value="">All</option>
+            <option value="HIGH">High</option>
+            <option value="MEDIUM">Medium</option>
+            <option value="LOW">Low</option>
+            <option value="UNKNOWN">Unknown</option>
+          </select>
+        </div>
+        <div><label for="fSource">Source</label>
+          <select id="fSource">
+            <option value="">All sources</option>
+            <option value="USGS">USGS</option>
+            <option value="GDACS">GDACS</option>
+          </select>
+        </div>
+        <div><label for="fStatus">Status</label>
+          <select id="fStatus">
+            <option value="">All</option>
+            <option value="ACTIVE">Active</option>
+            <option value="REPORTED">Reported</option>
+            <option value="REVIEWED_BY_SOURCE">Reviewed</option>
+          </select>
+        </div>
+        <div class="wide"><label for="fSearch">Search title / country</label>
+          <input type="search" id="fSearch" placeholder="e.g. Japan, cyclone, Java…">
+        </div>
+      </div>
+      <div class="list-head"><span id="listCount">— events</span><span id="listUpdated">not loaded yet</span></div>
+      <div class="event-list" id="eventList"></div>
+      <div class="statusbar" id="srcStatus"></div>
+    </div>
+
+    <div class="map-wrap">
+      <div id="map"></div>
+      <div class="legend">
+        <div><span class="dot HIGH"></span>High severity</div>
+        <div><span class="dot MEDIUM"></span>Medium severity</div>
+        <div><span class="dot LOW"></span>Low severity</div>
+        <div><span class="dot UNKNOWN"></span>Unknown / no rating</div>
+      </div>
+      <aside class="detail" id="detail"></aside>
+    </div>
+  </section>
+</main>
+<footer>
+  Events reported by USGS and GDACS. “Severity” is an internal display category, not an official impact assessment.
+  Source: Global Disaster Alert and Coordination System (GDACS) · U.S. Geological Survey (USGS). Impact zones shown as point locations where no geometry is provided.
+</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const SEV_COLOR = { HIGH:"#ef4444", MEDIUM:"#f59e0b", LOW:"#34d399", UNKNOWN:"#94a3b8" };
+  const TYPE_LABEL = { EARTHQUAKE:"Earthquake", TROPICAL_CYCLONE:"Tropical cyclone", FLOOD:"Flood",
+    VOLCANO:"Volcano", DROUGHT:"Drought", WILDFIRE:"Wildfire", OTHER:"Other" };
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle:"medium", timeStyle:"short", timeZone:"UTC" }) + " UTC" : "—";
+
+  const map = L.map("map", { worldCopyJump: true }).setView([20, 10], 2);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+  const eventLayer = L.layerGroup().addTo(map);
+
+  let rawEvents = [];
+  let selectedId = null;
+  let refreshTimer = null;
+
+  function markerRadius(e) {
+    if (e.event_type === "EARTHQUAKE" && e.magnitude != null) return Math.min(18, 4 + e.magnitude * 1.6);
+    const r = { HIGH: 11, MEDIUM: 9, LOW: 7, UNKNOWN: 6 };
+    return r[e.severity] || 6;
+  }
+
+  function passesFilters(e) {
+    const q = $("fSearch").value.trim().toLowerCase();
+    if ($("fType").value && e.event_type !== $("fType").value) return false;
+    if ($("fSev").value && e.severity !== $("fSev").value) return false;
+    if ($("fSource").value && e.source !== $("fSource").value) return false;
+    if ($("fStatus").value && e.status !== $("fStatus").value && e.verification !== $("fStatus").value) return false;
+    if (q) {
+      const hay = [e.title, e.description, e.affected_countries, e.source_event_id].filter(Boolean).join(" ").toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  }
+
+  function render() {
+    const visible = rawEvents.filter(passesFilters);
+
+    // KPIs (reflect filters so the numbers always match the map)
+    $("kTotal").textContent = fmt(visible.length);
+    $("kTotalSub").textContent = fmt(rawEvents.length) + " loaded total";
+    $("kHigh").textContent = fmt(visible.filter(e => e.severity === "HIGH").length);
+    const eq = visible.filter(e => e.event_type === "EARTHQUAKE");
+    $("kEq").textContent = fmt(eq.length);
+    $("kEqSub").textContent = eq.filter(e => e.magnitude != null).length
+      ? "max M" + Math.max(...eq.map(e => e.magnitude)) : "no magnitude data";
+    $("kStorm").textContent = fmt(visible.filter(e => ["TROPICAL_CYCLONE","FLOOD","VOLCANO","DROUGHT","WILDFIRE"].includes(e.event_type)).length);
+
+    // List
+    $("listCount").textContent = fmt(visible.length) + " events";
+    const list = $("eventList");
+    if (!visible.length) {
+      list.innerHTML = '<div style="padding:20px;color:#91a2ba;font-size:12px;text-align:center">No events match the current filters.</div>';
+    } else {
+      list.innerHTML = visible.map(e => `
+        <div class="event-item ${e.event_id === selectedId ? "selected" : ""}" data-id="${e.event_id}">
+          <div class="t"><span class="dot ${e.severity}"></span>${escapeHtml(e.title)}<span class="badge">${TYPE_LABEL[e.event_type] || e.event_type}</span></div>
+          <div class="m">${e.source} · ${fmtTime(e.occurred_at)}${e.affected_countries ? " · " + escapeHtml(e.affected_countries) : ""}</div>
+        </div>`).join("");
+      list.querySelectorAll(".event-item").forEach(el =>
+        el.addEventListener("click", () => selectEvent(el.dataset.id)));
+    }
+
+    // Map
+    eventLayer.clearLayers();
+    for (const e of visible) {
+      if (e.latitude == null || e.longitude == null) continue;
+      const m = L.circleMarker([e.latitude, e.longitude], {
+        radius: markerRadius(e),
+        color: SEV_COLOR[e.severity] || SEV_COLOR.UNKNOWN,
+        weight: 1.5,
+        fillColor: SEV_COLOR[e.severity] || SEV_COLOR.UNKNOWN,
+        fillOpacity: 0.55
+      });
+      m.bindTooltip(`${e.title}${e.magnitude != null ? " · M" + e.magnitude : ""}`, { direction: "top", offset: [0, -8] });
+      m.on("click", () => selectEvent(e.event_id));
+      m.addTo(eventLayer);
+    }
+  }
+
+  function selectEvent(id) {
+    selectedId = id;
+    const e = rawEvents.find(x => x.event_id === id);
+    document.querySelectorAll(".event-item").forEach(el =>
+      el.classList.toggle("selected", el.dataset.id === id));
+    if (!e) { $("detail").classList.remove("open"); return; }
+
+    const rows = [
+      ["Type", TYPE_LABEL[e.event_type] || e.event_type],
+      ["Source", e.source + (e.source_event_id ? " · " + e.source_event_id : "")],
+      ["Occurred", fmtTime(e.occurred_at)],
+      e.updated_at ? ["Updated", fmtTime(e.updated_at)] : null,
+      e.magnitude != null ? ["Magnitude", "M" + e.magnitude + (e.magnitude_type ? " " + e.magnitude_type : "")] : null,
+      e.depth_km != null ? ["Depth", e.depth_km + " km"] : null,
+      e.source_alert_level ? ["Source alert", e.source_alert_level] : null,
+      ["Status", e.status + " · " + e.verification],
+      e.affected_countries ? ["Countries", e.affected_countries] : null,
+      e.felt_reports != null ? ["Felt reports", fmt(e.felt_reports)] : null,
+      e.tsunami ? ["Tsunami", "Tsunami warning flag set"] : null
+    ].filter(Boolean);
+
+    $("detail").innerHTML = `
+      <button class="close" id="dClose" aria-label="Close">×</button>
+      <h3>${escapeHtml(e.title)}</h3>
+      <div class="sub">${e.latitude != null ? e.latitude.toFixed(3) + ", " + e.longitude.toFixed(3) : "location unavailable"}</div>
+      <div><span class="sev ${e.severity}">${e.severity}</span></div>
+      <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(String(v))}</dd>`).join("")}</dl>
+      ${e.description ? `<dl class="kv"><dt>Details</dt><dd>${escapeHtml(String(e.description).replace(/<[^>]*>/g, " "))}</dd></dl>` : ""}
+      ${e.source_url ? `<a href="${escapeAttr(e.source_url)}" target="_blank" rel="noopener">Open original source report ↗</a>` : ""}
+      <div class="note">Severity shown is an internal display category derived from magnitude or GDACS alert level. It is not an official impact assessment. ${e.geometry ? "Impact geometry available from source." : "Impact range unknown — point location only."}</div>`;
+    $("detail").classList.add("open");
+    $("dClose").addEventListener("click", () => { $("detail").classList.remove("open"); selectedId = null;
+      document.querySelectorAll(".event-item").forEach(el => el.classList.remove("selected")); });
+
+    if (e.latitude != null && e.longitude != null && !$("detail").matches(":hover")) {
+      map.setView([e.latitude, e.longitude], Math.max(map.getZoom(), 5), { animate: true });
+    }
+  }
+
+  function escapeHtml(s) { return s.replace(/[&<>"']/g, c => ({ "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;" }[c])); }
+  function escapeAttr(s) { return s.replace(/"/g, "&quot;"); }
+
+  async function loadData() {
+    $("refresh").disabled = true;
+    $("listUpdated").textContent = "loading…";
+    const params = new URLSearchParams({ days: $("days").value, usgsFeed: $("usgsFeed").value });
+    try {
+      const res = await fetch("/api/disruptions?" + params.toString());
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      rawEvents = data.events || [];
+      render();
+
+      const ok = Object.values(data.sources || {}).filter(s => s.status === "ok").length;
+      $("kSources").textContent = ok + " / " + Object.keys(data.sources || {}).length;
+      $("kSourcesSub").textContent = Object.entries(data.sources || {}).map(([k, s]) =>
+        k + ": " + (s.status === "ok" ? fmt(s.count) + " events" : "error")).join(" · ");
+      $("srcStatus").innerHTML = Object.entries(data.sources || {}).map(([k, s]) =>
+        s.status === "ok"
+          ? `<span class="src-ok">● ${k} ok</span> (${fmt(s.count)} events, ${fmtTime(s.fetched_at)})`
+          : `<span class="src-err">● ${k} error: ${escapeHtml(s.error || "unknown")}</span>`).join(" &nbsp; ");
+      $("listUpdated").textContent = "updated " + new Date().toLocaleTimeString();
+    } catch (err) {
+      $("srcStatus").innerHTML = `<span class="src-err">● Load failed: ${escapeHtml(String(err.message || err))}</span>`;
+      $("listUpdated").textContent = "load failed";
+    } finally {
+      $("refresh").disabled = false;
+    }
+  }
+
+  function setupAutoRefresh() {
+    if (refreshTimer) { clearInterval(refreshTimer); refreshTimer = null; }
+    if ($("autoRefresh").checked) refreshTimer = setInterval(loadData, 5 * 60 * 1000);
+  }
+
+  $("refresh").addEventListener("click", loadData);
+  $("days").addEventListener("change", loadData);
+  $("usgsFeed").addEventListener("change", loadData);
+  $("autoRefresh").addEventListener("change", setupAutoRefresh);
+  for (const id of ["fType", "fSev", "fSource", "fStatus"]) $(id).addEventListener("change", render);
+  $("fSearch").addEventListener("input", render);
+
+  loadData();
+  setupAutoRefresh();
+</script>
+</body>
+</html>
