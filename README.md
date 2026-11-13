@@ -21,7 +21,6 @@ portsmonitor/
 ├── api/
 │   └── benchmark.js
 ├── public/
-│   └── index.html
 ├── .gitignore
 ├── package.json
 ├── vercel.json
