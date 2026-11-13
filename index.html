@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Global Port & Fleet — AIS Data Benchmark</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+  <style>
+    :root { color-scheme: dark; --bg:#0b1220; --panel:#111c2e; --muted:#91a2ba; --line:#26364d; --accent:#38bdf8; --green:#34d399; }
+    * { box-sizing:border-box; }
+    body { margin:0; font-family:Inter,Segoe UI,Arial,sans-serif; background:var(--bg); color:#e8eef7; }
+    header { padding:22px 26px; border-bottom:1px solid var(--line); background:#0e1929; }
+    header h1 { margin:0 0 6px; font-size:22px; }
+    header p { margin:0; color:var(--muted); font-size:13px; }
+    main { padding:20px; max-width:1500px; margin:auto; }
+    .toolbar,.metric,.provider { background:var(--panel); border:1px solid var(--line); border-radius:12px; }
+    .toolbar { display:flex; flex-wrap:wrap; align-items:end; gap:14px; padding:16px; margin-bottom:16px; }
+    label { display:block; color:var(--muted); font-size:12px; margin-bottom:7px; }
+    select,button { min-height:40px; border-radius:8px; border:1px solid #34465f; padding:0 12px; background:#17263b; color:#eef6ff; font-size:14px; }
+    button { background:#0284c7; border-color:#0284c7; font-weight:650; cursor:pointer; }
+    button:disabled { opacity:.55; cursor:not-allowed; }
+    .hint { color:var(--muted); font-size:12px; margin-left:auto; max-width:440px; line-height:1.5; }
+    .metrics { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; margin-bottom:16px; }
+    .metric { padding:15px; }
+    .metric .name { color:var(--muted); font-size:12px; }
+    .metric .value { font-size:27px; font-weight:700; margin-top:7px; }
+    .metric .sub { color:var(--muted); font-size:11px; margin-top:4px; }
+    .layout { display:grid; grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr); gap:16px; }
+    #map { min-height:540px; height:62vh; border-radius:12px; border:1px solid var(--line); overflow:hidden; }
+    .side { display:flex; flex-direction:column; gap:12px; }
+    .provider { padding:15px; }
+    .provider h3 { margin:0 0 12px; font-size:15px; }
+    .status { color:var(--muted); font-size:12px; margin-bottom:12px; }
+    .stats { display:grid; grid-template-columns:1fr 1fr; gap:10px; }
+    .stats div { background:#0d1727; border-radius:8px; padding:10px; }
+    .stats strong { display:block; font-size:19px; }
+    .stats span { color:var(--muted); font-size:11px; }
+    .errors { color:#fca5a5; font-size:11px; margin-top:10px; white-space:pre-wrap; }
+    .bottom { margin-top:16px; background:var(--panel); border:1px solid var(--line); border-radius:12px; overflow:hidden; }
+    .bottom-head { display:flex; justify-content:space-between; align-items:center; padding:14px 16px; border-bottom:1px solid var(--line); }
+    .bottom-head h3 { margin:0; font-size:15px; }
+    .bottom-head button { min-height:34px; font-size:12px; }
+    .table-wrap { overflow:auto; max-height:320px; }
+    table { width:100%; border-collapse:collapse; font-size:12px; }
+    th,td { padding:10px 12px; text-align:left; border-bottom:1px solid var(--line); white-space:nowrap; }
+    th { color:var(--muted); position:sticky; top:0; background:#142137; }
+    .empty { padding:24px; color:var(--muted); text-align:center; font-size:13px; }
+    footer { padding:20px; color:var(--muted); font-size:11px; text-align:center; }
+    .legend { color:var(--muted); font-size:11px; margin-top:8px; }
+    @media(max-width:900px) { .layout { grid-template-columns:1fr; } #map { height:48vh; min-height:380px; } .metrics { grid-template-columns:repeat(2,1fr); } .hint { margin-left:0; } }
+    @media(max-width:520px) { main { padding:12px; } header { padding:18px 14px; } .metrics { gap:8px; } .metric .value { font-size:22px; } }
+  </style>
+</head>
+<body>
+<header>
+  <h1>Global Port & Fleet Monitoring</h1>
+  <p>AIS Data Benchmark · Compare live vessel message streams by port region</p>
+</header>
+<main>
+  <section class="toolbar">
+    <div>
+      <label for="port">Port / test region</label>
+      <select id="port">
+        <option value="miami">Miami</option>
+        <option value="singapore">Singapore</option>
+        <option value="rotterdam">Rotterdam</option>
+        <option value="shanghai">Shanghai</option>
+        <option value="jebelali">Jebel Ali</option>
+      </select>
+    </div>
+    <div>
+      <label for="duration">Test duration</label>
+      <select id="duration">
+        <option value="60">60 seconds</option>
+        <option value="120">120 seconds</option>
+      </select>
+    </div>
+    <button id="start">Start benchmark</button>
+    <div class="hint" id="status">Choose a region and start a test. Both providers will be tested in parallel.</div>
+  </section>
+
+  <section class="metrics">
+    <div class="metric"><div class="name">Total AIS messages</div><div class="value" id="totalMessages">—</div><div class="sub">Both providers combined</div></div>
+    <div class="metric"><div class="name">Unique vessels</div><div class="value" id="totalVessels">—</div><div class="sub">Provider counts are shown separately below</div></div>
+    <div class="metric"><div class="name">Combined messages / sec</div><div class="value" id="totalRate">—</div><div class="sub">Average across test duration</div></div>
+    <div class="metric"><div class="name">Vessel positions</div><div class="value" id="totalPositions">—</div><div class="sub">Messages containing valid coordinates</div></div>
+  </section>
+
+  <section class="layout">
+    <div>
+      <div id="map"></div>
+      <div class="legend">Map shows the latest position received for each MMSI. Marker colours distinguish data providers.</div>
+    </div>
+    <div class="side">
+      <article class="provider">
+        <h3>AISStream</h3>
+        <div class="status" id="aisStatus">Not tested yet</div>
+        <div class="stats">
+          <div><strong id="aisMessages">—</strong><span>Messages</span></div>
+          <div><strong id="aisVessels">—</strong><span>Unique MMSI</span></div>
+          <div><strong id="aisRate">—</strong><span>Messages / sec</span></div>
+          <div><strong id="aisPositions">—</strong><span>Position messages</span></div>
+        </div>
+        <div class="errors" id="aisErrors"></div>
+      </article>
+      <article class="provider">
+        <h3>Open Waters</h3>
+        <div class="status" id="owStatus">Not tested yet</div>
+        <div class="stats">
+          <div><strong id="owMessages">—</strong><span>Messages</span></div>
+          <div><strong id="owVessels">—</strong><span>Unique MMSI</span></div>
+          <div><strong id="owRate">—</strong><span>Messages / sec</span></div>
+          <div><strong id="owPositions">—</strong><span>Position messages</span></div>
+        </div>
+        <div class="errors" id="owErrors"></div>
+      </article>
+      <article class="provider">
+        <h3>How to interpret this test</h3>
+        <div class="status">
+          This is a short regional sample, not a census of all vessels in the port. AIS broadcasts are event-driven. Message rate varies with vessel activity, receiver coverage and provider limits. A missing message does not prove a vessel is absent.
+        </div>
+      </article>
+    </div>
+  </section>
+
+  <section class="bottom">
+    <div class="bottom-head">
+      <h3>Latest vessels received</h3>
+      <button id="export" disabled>Export CSV</button>
+    </div>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Provider</th><th>MMSI</th><th>Vessel</th><th>Latitude</th><th>Longitude</th><th>Speed (kn)</th><th>Updates</th></tr></thead>
+        <tbody id="vesselRows"><tr><td colspan="7" class="empty">No benchmark data yet.</td></tr></tbody>
+      </table>
+    </div>
+  </section>
+</main>
+<footer>
+  AIS data is supplied by third-party networks. Coverage, latency, retention and commercial-use rights are subject to each provider's terms.
+</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const portCenters = {
+    miami: [25.7748, -80.2022],
+    singapore: [1.28, 103.85],
+    rotterdam: [51.95, 4.10],
+    shanghai: [31.20, 121.55],
+    jebelali: [25.05, 55.05]
+  };
+
+  const map = L.map("map").setView(portCenters.miami, 11);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18,
+    attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+  }).addTo(map);
+
+  let markerLayer = L.layerGroup().addTo(map);
+  let lastResults = null;
+  let vesselRows = [];
+
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => Number(n || 0).toLocaleString();
+
+  $("port").addEventListener("change", () => {
+    map.setView(portCenters[$("port").value], 11);
+  });
+
+  function resetUI() {
+    for (const id of ["totalMessages","totalVessels","totalRate","totalPositions",
+      "aisMessages","aisVessels","aisRate","aisPositions",
+      "owMessages","owVessels","owRate","owPositions"]) $(id).textContent = "—";
+    $("aisStatus").textContent = "Waiting for result";
+    $("owStatus").textContent = "Waiting for result";
+    $("aisErrors").textContent = "";
+    $("owErrors").textContent = "";
+    $("vesselRows").innerHTML = '<tr><td colspan="7" class="empty">Benchmark running…</td></tr>';
+    markerLayer.clearLayers();
+  }
+
+  function renderProvider(prefix, result) {
+    const labels = {
+      receiving: "Completed collection",
+      disconnected: "Disconnected before test completed",
+      connection_error: "Connection error",
+      connection_timeout: "Connection timed out",
+      subscription_error: "Subscription error",
+      no_connection: "No connection",
+      not_configured: "Not configured",
+      connecting: "Connecting"
+    };
+    $(prefix + "Status").textContent = labels[result.status] || result.status;
+    $(prefix + "Messages").textContent = fmt(result.messages);
+    $(prefix + "Vessels").textContent = fmt(result.uniqueVessels);
+    $(prefix + "Rate").textContent = Number(result.messagesPerSecond || 0).toFixed(2);
+    $(prefix + "Positions").textContent = fmt(result.positionMessages);
+    $(prefix + "Errors").textContent = (result.errors || []).join("\\n");
+  }
+
+  function escapeHtml(s) {
+    return String(s ?? "").replace(/[&<>"']/g, c => ({
+      "&":"&amp;", "<":"&lt;", ">":"&gt;", '"':"&quot;", "'":"&#39;"
+    }[c]));
+  }
+
+  function render(data) {
+    lastResults = data;
+    const [ais, ow] = data.results;
+    renderProvider("ais", ais);
+    renderProvider("ow", ow);
+
+    $("totalMessages").textContent = fmt(ais.messages + ow.messages);
+    $("totalVessels").textContent = fmt(ais.uniqueVessels + ow.uniqueVessels);
+    $("totalRate").textContent = (ais.messagesPerSecond + ow.messagesPerSecond).toFixed(2);
+    $("totalPositions").textContent = fmt(ais.positionMessages + ow.positionMessages);
+
+    vesselRows = [];
+    markerLayer.clearLayers();
+    const rows = [];
+
+    for (const result of data.results) {
+      for (const vessel of (result.vessels || [])) {
+        vesselRows.push({ provider: result.provider, ...vessel });
+        rows.push(`<tr>
+          <td>${escapeHtml(result.provider)}</td>
+          <td>${escapeHtml(vessel.mmsi)}</td>
+          <td>${escapeHtml(vessel.name)}</td>
+          <td>${vessel.lat == null ? "—" : Number(vessel.lat).toFixed(5)}</td>
+          <td>${vessel.lon == null ? "—" : Number(vessel.lon).toFixed(5)}</td>
+          <td>${vessel.speed == null ? "—" : Number(vessel.speed).toFixed(1)}</td>
+          <td>${fmt(vessel.updates)}</td>
+        </tr>`);
+
+        if (Number.isFinite(vessel.lat) && Number.isFinite(vessel.lon)) {
+          const color = result.provider === "AISStream" ? "#38bdf8" : "#f59e0b";
+          const marker = L.circleMarker([vessel.lat, vessel.lon], {
+            radius: 6, color, fillColor: color, fillOpacity: 0.85, weight: 1
+          });
+          marker.bindPopup(`<b>${escapeHtml(vessel.name)}</b><br>MMSI: ${escapeHtml(vessel.mmsi)}<br>Source: ${escapeHtml(result.provider)}<br>Speed: ${vessel.speed ?? "—"} kn`);
+          marker.addTo(markerLayer);
+        }
+      }
+    }
+
+    $("vesselRows").innerHTML = rows.length
+      ? rows.slice(0, 1000).join("")
+      : '<tr><td colspan="7" class="empty">No vessel position messages were received during this test.</td></tr>';
+    $("export").disabled = vesselRows.length === 0;
+  }
+
+  $("start").addEventListener("click", async () => {
+    $("start").disabled = true;
+    const port = $("port").value;
+    const durationSec = Number($("duration").value);
+    $("status").textContent = `Testing ${$("port").selectedOptions[0].text} for ${durationSec} seconds. Keep this page open…`;
+    resetUI();
+
+    try {
+      const response = await fetch("/api/benchmark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ port, durationSec })
+      });
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || `HTTP ${response.status}`);
+      render(data);
+      $("status").textContent = `Test completed for ${data.port}. Duration: ${data.durationSec}s.`;
+    } catch (err) {
+      $("status").textContent = `Benchmark failed: ${err.message}`;
+      $("vesselRows").innerHTML = `<tr><td colspan="7" class="empty">${escapeHtml(err.message)}</td></tr>`;
+    } finally {
+      $("start").disabled = false;
+    }
+  });
+
+  $("export").addEventListener("click", () => {
+    if (!lastResults) return;
+    const header = ["Provider","MMSI","Vessel","Latitude","Longitude","Speed_knots","Updates","FirstSeen","LastSeen"];
+    const rows = [header, ...vesselRows.map(v => [
+      v.provider, v.mmsi, v.name, v.lat ?? "", v.lon ?? "", v.speed ?? "",
+      v.updates, v.firstSeen, v.lastSeen
+    ])];
+    const csv = rows.map(row => row.map(value =>
+      '"' + String(value ?? "").replace(/"/g, '""') + '"'
+    ).join(",")).join("\\r\\n");
+    const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `ais-benchmark-${lastResults.portKey}-${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+  });
+</script>
+</body>
+</html>
