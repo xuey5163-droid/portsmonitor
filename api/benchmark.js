@@ -196,11 +196,20 @@ function consumeOpenWaters(stats, raw) {
     };
   }
 
-  // opportunistically capture ship type if the payload provides it
+  // Open Waters: for AIS message type 5 (ShipStaticData) the decoded fields
+  // live inside "message" (Name / Type / MaximumStaticDraught, same naming as AISStream)
+  const m = (event.message && typeof event.message === "object") ? event.message : {};
+  if (event.msg_type === 5 && !stats.staticDebug.owMsg5Keys) {
+    stats.staticDebug.owMsg5Keys = Object.keys(m);
+    stats.staticDebug.owMsg5Sample = JSON.stringify(m).slice(0, 500);
+  }
+
   addStatic(stats, event.mmsi, {
-    name: event.name || event.ship_name || event.vessel_name || null,
-    shipType: event.ship_type ?? event.shipType ?? null,
-    shipTypeText: event.ship_type_text || event.shipTypeText || null
+    name: event.name || event.ship_name || event.vessel_name || m.Name || m.ShipName || null,
+    shipType: event.ship_type ?? event.shipType ?? m.Type ?? m.ShipType ?? null,
+    shipTypeText: event.ship_type_text || event.shipTypeText || null,
+    destination: (m.Destination || "").trim() || null,
+    draught: m.MaximumStaticDraught ?? m.MaximumDraught ?? null
   });
 
   addVessel(
