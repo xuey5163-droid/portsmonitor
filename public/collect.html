@@ -45,6 +45,13 @@
           <option value="rotterdam">Rotterdam</option>
           <option value="shanghai">Shanghai</option>
           <option value="jebelali">Jebel Ali</option>
+          <option value="losangeles">Los Angeles / Long Beach</option>
+          <option value="newyork">New York / New Jersey</option>
+          <option value="savannah">Savannah</option>
+          <option value="houston">Houston</option>
+          <option value="portsaid">Port Said / Suez</option>
+          <option value="colombo">Colombo</option>
+          <option value="busan">Busan</option>
         </select>
       </div>
       <div><label for="duration">Duration</label>
@@ -72,7 +79,7 @@
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
-  const PORTS = ["miami","singapore","rotterdam","shanghai","jebelali"];
+  const PORTS = ["miami","singapore","rotterdam","shanghai","jebelali","losangeles","newyork","savannah","houston","portsaid","colombo","busan"];
   const key = (p) => "pw_snapshot_" + p;
 
   function classifyShip(t) {
