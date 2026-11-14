@@ -30,6 +30,48 @@ const PORTS = {
     center: [25.05, 55.05],
     aisBox: [[25.45, 54.75], [24.75, 55.45]],
     openWatersBox: [24.75, 54.75, 25.45, 55.45]
+  },
+  losangeles: {
+    name: "Los Angeles / Long Beach",
+    center: [33.73, -118.26],
+    aisBox: [[34.10, -118.60], [33.40, -117.90]],
+    openWatersBox: [33.40, -118.60, 34.10, -117.90]
+  },
+  newyork: {
+    name: "New York / New Jersey",
+    center: [40.67, -74.02],
+    aisBox: [[40.85, -74.30], [40.45, -73.75]],
+    openWatersBox: [40.45, -74.30, 40.85, -73.75]
+  },
+  savannah: {
+    name: "Savannah",
+    center: [32.08, -81.09],
+    aisBox: [[32.35, -81.35], [31.85, -80.80]],
+    openWatersBox: [31.85, -81.35, 32.35, -80.80]
+  },
+  houston: {
+    name: "Houston",
+    center: [29.73, -95.27],
+    aisBox: [[30.05, -95.55], [29.40, -94.95]],
+    openWatersBox: [29.40, -95.55, 30.05, -94.95]
+  },
+  portsaid: {
+    name: "Port Said / Suez",
+    center: [31.26, 32.30],
+    aisBox: [[31.55, 32.00], [30.90, 32.70]],
+    openWatersBox: [30.90, 32.00, 31.55, 32.70]
+  },
+  colombo: {
+    name: "Colombo",
+    center: [6.93, 79.84],
+    aisBox: [[7.15, 79.60], [6.70, 80.10]],
+    openWatersBox: [6.70, 79.60, 7.15, 80.10]
+  },
+  busan: {
+    name: "Busan",
+    center: [35.10, 129.04],
+    aisBox: [[35.40, 128.75], [34.80, 129.40]],
+    openWatersBox: [34.80, 128.75, 35.40, 129.40]
   }
 };
 
@@ -72,7 +114,7 @@ function getMmsi(value) {
   return /^\d{7,9}$/.test(s) ? s : null;
 }
 
-function addVessel(stats, mmsiValue, name, latValue, lonValue, speedValue) {
+function addVessel(stats, mmsiValue, name, latValue, lonValue, speedValue, headingValue) {
   const mmsi = getMmsi(mmsiValue);
   if (!mmsi) return;
 
@@ -90,6 +132,7 @@ function addVessel(stats, mmsiValue, name, latValue, lonValue, speedValue) {
     lat: null,
     lon: null,
     speed: null,
+    heading: null,
     updates: 0,
     firstSeen: new Date().toISOString(),
     lastSeen: null
@@ -102,6 +145,8 @@ function addVessel(stats, mmsiValue, name, latValue, lonValue, speedValue) {
   }
   const speed = Number(speedValue);
   if (Number.isFinite(speed)) previous.speed = speed;
+  const heading = Number(headingValue);
+  if (Number.isFinite(heading) && heading >= 0 && heading <= 360) previous.heading = heading;
   previous.updates += 1;
   previous.lastSeen = new Date().toISOString();
 
@@ -177,7 +222,8 @@ function consumeAisStream(stats, raw) {
     meta.ShipName,
     meta.Latitude ?? meta.latitude ?? report.Latitude,
     meta.Longitude ?? meta.longitude ?? report.Longitude,
-    report.Sog
+    report.Sog,
+    report.Cog ?? report.TrueHeading
   );
 }
 
@@ -220,7 +266,8 @@ function consumeOpenWaters(stats, raw) {
     event.name || event.ship_name || event.vessel_name,
     event.lat,
     event.lon,
-    event.sog ?? event.speed
+    event.sog ?? event.speed,
+    event.cog ?? event.heading
   );
 }
 
