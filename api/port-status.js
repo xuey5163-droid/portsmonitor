@@ -15,7 +15,7 @@ export default async function handler(req, res) {
   try {
     const pwPorts = await fetchPortWatchPorts();
     const { matched, unmatched } = matchPorts(WORLD_PORTS, pwPorts);
-    const seriesByPort = await fetchDailySeries(matched.map(p => p.pw_portid), 110);
+    const seriesByPort = await fetchDailySeries(matched.map(p => p.pw_portid), 80);
     const { ports, data_last_date } = computePortStatus(matched, seriesByPort, 90);
 
     const count = (s) => ports.filter(p => p.status === s).length;
