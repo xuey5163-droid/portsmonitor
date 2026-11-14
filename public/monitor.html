@@ -194,7 +194,7 @@
   const TYPE_COLOR = { CARGO:"#22c55e", TANKER:"#ef4444", PASSENGER:"#3b82f6", FISHING:"#b45309",
     HIGH_SPEED:"#eab308", OTHER:"#eab308", UNKNOWN:"#38bdf8" };
   const PORT_COLOR = { NORMAL:"#34d399", BUSY:"#facc15", ELEVATED:"#f97316", SUPPRESSED:"#ef4444", UNKNOWN:"#64748b" };
-  const SNAPSHOT_PORTS = ["cnsha","cnngb","cnszx","cnhkg","cntao","cntsn","krpus","jptyo","jpyok","jpukb","twtxg","twkel","sgsin","mypkg","mytpp","thlch","vnsgn","vnhph","idjkt","phmnl","khkos","lkcmb","innsa","inmaa","pkkhi","bdcgp","aejea","sajed","sadmm","qahmd","bhkbs","omsll","yeade","irbnd","nlrtm","beanr","deham","debrv","frleh","esvlc","esbcn","esalg","itgoa","grpir","segvx","gbfxt","gbsou","plgdn","rocnd","egaly","egpsd","egdam","zadur","zacpt","ngapp","ghtem","macas","dzalg","kemba","djjib","uslax","usoak","ussea","ussav","usnyc","usorf","uschs","usmia","ushou","brssz","arbue","pecll","clsai","ecgye","cobun","pablb","pactn","coctg","jmkin","mxver","ausyd","aumel","aufre","nzakl"];
+  const SNAPSHOT_PORTS = ["miami","singapore","rotterdam","shanghai","jebelali","losangeles","newyork","savannah","houston","portsaid","colombo","busan","cnsha","cnngb","cnszx","cnhkg","cntao","cntsn","krpus","jptyo","jpyok","jpukb","twtxg","twkel","sgsin","mypkg","mytpp","thlch","vnsgn","vnhph","idjkt","phmnl","khkos","lkcmb","innsa","inmaa","pkkhi","bdcgp","aejea","sajed","sadmm","qahmd","bhkbs","omsll","yeade","irbnd","nlrtm","beanr","deham","debrv","frleh","esvlc","esbcn","esalg","itgoa","grpir","segvx","gbfxt","gbsou","plgdn","rocnd","egaly","egpsd","egdam","zadur","zacpt","ngapp","ghtem","macas","dzalg","kemba","djjib","uslax","usoak","ussea","ussav","usnyc","usorf","uschs","usmia","ushou","brssz","arbue","pecll","clsai","ecgye","cobun","pablb","pactn","coctg","jmkin","mxver","ausyd","aumel","aufre","nzakl"];
 
   const map = L.map("map", { worldCopyJump:true, zoomControl:true }).setView([25, 60], 3);
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
@@ -233,11 +233,18 @@
       $("kExposed").textContent = fmt(byPort.size);
     } catch {}
 
-    try {
-      const ps = await (await fetch("/api/port-status")).json();
+    let ps = null;
+    for (let attempt = 0; attempt < 2 && !ps; attempt++) {
+      try {
+        const r = await fetch("/api/port-status");
+        if (r.ok) ps = await r.json();
+      } catch {}
+      if (!ps) await new Promise(res => setTimeout(res, 3000));
+    }
+    if (ps) {
       portStatusById = new Map((ps.ports || []).map(p => [p.id, p]));
       $("kAbnormal").textContent = fmt((ps.ports || []).filter(p => p.status === "ELEVATED" || p.status === "SUPPRESSED").length);
-    } catch {}
+    }
 
     // vessel snapshots (optional)
     const snaps = await Promise.all(SNAPSHOT_PORTS.map(async (k) => {
