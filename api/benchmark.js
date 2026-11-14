@@ -52,6 +52,8 @@ function makeStats(provider) {
     provider,
     status: "connecting",
     messages: 0,
+    rawMessages: 0,
+    firstRaw: null,
     positionMessages: 0,
     staticMessages: 0,
     uniqueVessels: 0,
@@ -238,6 +240,8 @@ function summarize(stats, durationSec) {
     messages: stats.messages,
     positionMessages: stats.positionMessages,
     staticMessages: stats.staticData.size,
+    rawMessages: stats.rawMessages,
+    firstRaw: stats.firstRaw,
     uniqueVessels: stats.uniqueVessels,
     vesselsWithType: withType.filter(v => v.shipClass && v.shipClass !== "UNKNOWN").length,
     messagesPerSecond: Number((stats.messages / elapsed).toFixed(2)),
@@ -299,6 +303,10 @@ function runProvider({ provider, url, subscribe, apiKey, durationSec, consume })
 
       socket.on("message", (data) => {
         if (finished) return;
+        stats.rawMessages += 1;
+        if (!stats.firstRaw) {
+          try { stats.firstRaw = data.toString().slice(0, 300); } catch {}
+        }
         try {
           consume(stats, data);
         } catch (err) {
