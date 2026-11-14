@@ -251,6 +251,14 @@ function consumeOpenWaters(stats, raw) {
     stats.staticDebug.owMsg5Keys = Object.keys(m);
     stats.staticDebug.owMsg5Sample = JSON.stringify(m).slice(0, 500);
   }
+  // nav data lives in "message" for position reports — capture keys once for diagnosis
+  if ([1,2,3,18,19].includes(Number(event.msg_type)) && !stats.staticDebug.owPosKeys) {
+    stats.staticDebug.owPosKeys = Object.keys(m);
+    stats.staticDebug.owPosSample = JSON.stringify(m).slice(0, 400);
+  }
+
+  const sog = event.sog ?? event.speed ?? m.Sog ?? m.sog ?? m.SOG ?? m.SpeedOverGround ?? null;
+  const cog = event.cog ?? event.heading ?? m.Cog ?? m.cog ?? m.COG ?? m.CourseOverGround ?? null;
 
   addStatic(stats, event.mmsi, {
     name: event.name || event.ship_name || event.vessel_name || m.Name || m.ShipName || null,
@@ -266,8 +274,8 @@ function consumeOpenWaters(stats, raw) {
     event.name || event.ship_name || event.vessel_name,
     event.lat,
     event.lon,
-    event.sog ?? event.speed,
-    event.cog ?? event.heading
+    sog,
+    cog
   );
 }
 
