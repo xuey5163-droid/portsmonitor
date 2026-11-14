@@ -33,14 +33,30 @@ const PORTS = {
   }
 };
 
+// AIS ShipType -> category (same buckets MarineTraffic-style maps use)
+export function classifyShip(shipType) {
+  const t = Number(shipType);
+  if (!Number.isFinite(t) || t === 0) return "UNKNOWN";
+  if (t >= 30 && t <= 39) return "FISHING";
+  if (t >= 40 && t <= 49) return "HIGH_SPEED";
+  if (t >= 60 && t <= 69) return "PASSENGER";
+  if (t >= 70 && t <= 79) return "CARGO";
+  if (t >= 80 && t <= 89) return "TANKER";
+  if (t >= 50 && t <= 59) return "OTHER";   // SAR / military / pilot / law enforcement
+  if (t >= 90 && t <= 99) return "OTHER";
+  return "OTHER";
+}
+
 function makeStats(provider) {
   return {
     provider,
     status: "connecting",
     messages: 0,
     positionMessages: 0,
+    staticMessages: 0,
     uniqueVessels: 0,
     vessels: new Map(),
+    staticData: new Map(),
     errors: [],
     startedAt: new Date().toISOString(),
     endedAt: null
@@ -90,6 +106,20 @@ function addVessel(stats, mmsiValue, name, latValue, lonValue, speedValue) {
   stats.uniqueVessels = stats.vessels.size;
 }
 
+function addStatic(stats, mmsiValue, fields) {
+  const mmsi = getMmsi(mmsiValue);
+  if (!mmsi) return;
+  const prev = stats.staticData.get(mmsi) || {
+    mmsi, name: null, shipType: null, shipTypeText: null,
+    destination: null, draught: null, length_m: null, beam_m: null
+  };
+  for (const [k, v] of Object.entries(fields)) {
+    if (v !== null && v !== undefined && v !== "") prev[k] = v;
+  }
+  prev.shipClass = classifyShip(prev.shipType);
+  stats.staticData.set(mmsi, prev);
+}
+
 function consumeAisStream(stats, raw) {
   let event;
   try {
@@ -99,6 +129,27 @@ function consumeAisStream(stats, raw) {
   }
 
   if (!event || event.MessageType === "SubscriptionConfirmation") return;
+
+  // static data messages: ship type, dimensions, destination
+  if (event.MessageType === "ShipStaticData") {
+    const meta = event.MetaData || {};
+    const msg = event.Message || {};
+    const r = msg.ShipStaticData || {};
+    const dim = r.Dimension || {};
+    const length = (Number(dim.A) || 0) + (Number(dim.B) || 0);
+    const beam = (Number(dim.C) || 0) + (Number(dim.D) || 0);
+    addStatic(stats, meta.MMSI ?? r.UserID, {
+      name: r.ShipName || meta.ShipName || null,
+      shipType: r.ShipType ?? meta.ShipType ?? null,
+      shipTypeText: r.ShipTypeText || meta.ShipTypeText || null,
+      destination: r.Destination || null,
+      draught: r.MaximumDraught ?? null,
+      length_m: length > 0 ? length : null,
+      beam_m: beam > 0 ? beam : null
+    });
+    return;
+  }
+
   if (event.MessageType !== "PositionReport"
       && event.MessageType !== "ExtendedClassBPositionReport"
       && event.MessageType !== "StandardClassBPositionReport") return;
@@ -130,6 +181,13 @@ function consumeOpenWaters(stats, raw) {
 
   if (!event || event.type !== "event") return;
 
+  // opportunistically capture ship type if the payload provides it
+  addStatic(stats, event.mmsi, {
+    name: event.name || event.ship_name || event.vessel_name || null,
+    shipType: event.ship_type ?? event.shipType ?? null,
+    shipTypeText: event.ship_type_text || event.shipTypeText || null
+  });
+
   addVessel(
     stats,
     event.mmsi,
@@ -143,18 +201,28 @@ function consumeOpenWaters(stats, raw) {
 function summarize(stats, durationSec) {
   const vessels = [...stats.vessels.values()];
   const elapsed = Math.max(1, durationSec);
+
+  // join static data onto vessel records (same MMSI)
+  const withType = vessels.map(v => {
+    const s = stats.staticData.get(v.mmsi);
+    return s ? { ...v, ...s, name: v.name !== "Unknown vessel" ? v.name : (s.name || v.name) } : v;
+  });
+
   return {
     provider: stats.provider,
     status: stats.status,
     messages: stats.messages,
     positionMessages: stats.positionMessages,
+    staticMessages: stats.staticData.size,
     uniqueVessels: stats.uniqueVessels,
+    vesselsWithType: withType.filter(v => v.shipClass && v.shipClass !== "UNKNOWN").length,
     messagesPerSecond: Number((stats.messages / elapsed).toFixed(2)),
     vesselsPerMinute: Number((stats.uniqueVessels / elapsed * 60).toFixed(2)),
     errors: stats.errors,
     startedAt: stats.startedAt,
     endedAt: stats.endedAt,
-    vessels: vessels.slice(0, 500)
+    vessels: withType.slice(0, 1000),
+    staticData: [...stats.staticData.values()].slice(0, 3000)
   };
 }
 
@@ -269,7 +337,8 @@ export default async function handler(req, res) {
         FilterMessageTypes: [
           "PositionReport",
           "ExtendedClassBPositionReport",
-          "StandardClassBPositionReport"
+          "StandardClassBPositionReport",
+          "ShipStaticData"
         ]
       }),
       consume: consumeAisStream
@@ -280,11 +349,14 @@ export default async function handler(req, res) {
       status: "not_configured",
       messages: 0,
       positionMessages: 0,
+      staticMessages: 0,
       uniqueVessels: 0,
+      vesselsWithType: 0,
       messagesPerSecond: 0,
       vesselsPerMinute: 0,
       errors: ["Set AISSTREAM_API_KEY in Vercel Environment Variables."],
-      vessels: []
+      vessels: [],
+      staticData: []
     }));
   }
 
