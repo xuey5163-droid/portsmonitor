@@ -1,0 +1,196 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AIS Snapshot Collector — portsmonitor</title>
+<style>
+  :root { color-scheme: dark; --bg:#0b1220; --panel:#111c2e; --muted:#91a2ba; --line:#26364d; --accent:#38bdf8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter,Segoe UI,Arial,sans-serif; background:var(--bg); color:#e8eef7; }
+  header { padding:18px 26px; border-bottom:1px solid var(--line); background:#0e1929; }
+  header h1 { margin:0 0 4px; font-size:20px; }
+  header p { margin:0; color:var(--muted); font-size:12px; }
+  header a { color:var(--accent); font-size:12px; text-decoration:none; margin-left:14px; }
+  main { padding:24px; max-width:900px; margin:auto; }
+  .card { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:20px 22px; margin-bottom:16px; }
+  label { display:block; color:var(--muted); font-size:12px; margin-bottom:6px; }
+  select, button { min-height:38px; border-radius:8px; border:1px solid #34465f; padding:0 14px; background:#17263b; color:#eef6ff; font-size:13px; font-family:inherit; cursor:pointer; }
+  button.primary { background:#0284c7; border-color:#0284c7; font-weight:700; }
+  button:disabled { opacity:.5; cursor:not-allowed; }
+  .row { display:flex; gap:12px; flex-wrap:wrap; align-items:flex-end; }
+  .row > div { min-width:180px; }
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:10px; }
+  th, td { text-align:left; padding:9px 10px; border-bottom:1px solid var(--line); }
+  th { color:var(--muted); font-weight:600; font-size:11px; text-transform:uppercase; letter-spacing:.4px; }
+  .stat { font-size:12px; color:var(--muted); margin-top:12px; line-height:1.7; }
+  .warn { color:#fcd34d; }
+  .ok { color:#6ee7b7; }
+  code { background:#17263b; padding:1px 6px; border-radius:4px; font-size:12px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>AIS Snapshot Collector</h1>
+  <p>Collect &amp; merge benchmark runs in the browser — no Node required. Now with ship-type data.
+     <a href="/disruptions.html">→ Disruption Monitor</a><a href="/vessels.html">→ Vessel Map</a></p>
+</header>
+<main>
+  <div class="card">
+    <div class="row">
+      <div><label for="port">Port / test region</label>
+        <select id="port">
+          <option value="miami">Miami</option>
+          <option value="singapore">Singapore</option>
+          <option value="rotterdam">Rotterdam</option>
+          <option value="shanghai">Shanghai</option>
+          <option value="jebelali">Jebel Ali</option>
+        </select>
+      </div>
+      <div><label for="duration">Duration</label>
+        <select id="duration">
+          <option value="120" selected>120 seconds (recommended)</option>
+          <option value="60">60 seconds</option>
+        </select>
+      </div>
+      <div><button class="primary" id="run">Run &amp; accumulate</button></div>
+    </div>
+    <div class="stat" id="status">Idle. Each run calls <code>/api/benchmark</code> (position + ShipStaticData),
+      waits for the stream, then merges vessels into local storage by MMSI (latest position and latest
+      static data win). Run 2–4 times per port at different moments for better coverage.</div>
+  </div>
+
+  <div class="card">
+    <label style="margin-bottom:10px">Accumulated snapshots (stored in this browser)</label>
+    <table>
+      <thead><tr><th>Port</th><th>Unique vessels</th><th>With ship type</th><th>Providers</th><th>Runs</th><th>Actions</th></tr></thead>
+      <tbody id="rows"></tbody>
+    </table>
+    <div class="stat">After downloading, upload each file to <code>public/data/</code> in the GitHub repo
+      (keep the exact file name). The Vessel Map page picks them up automatically.</div>
+  </div>
+</main>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const PORTS = ["miami","singapore","rotterdam","shanghai","jebelali"];
+  const key = (p) => "pw_snapshot_" + p;
+
+  function classifyShip(t) {
+    t = Number(t);
+    if (!Number.isFinite(t) || t === 0) return "UNKNOWN";
+    if (t >= 30 && t <= 39) return "FISHING";
+    if (t >= 40 && t <= 49) return "HIGH_SPEED";
+    if (t >= 60 && t <= 69) return "PASSENGER";
+    if (t >= 70 && t <= 79) return "CARGO";
+    if (t >= 80 && t <= 89) return "TANKER";
+    return "OTHER";
+  }
+
+  function load(p) {
+    try { return JSON.parse(localStorage.getItem(key(p))) || null; } catch { return null; }
+  }
+  function save(p, data) { localStorage.setItem(key(p), JSON.stringify(data)); }
+
+  function mergeRun(existing, runResult) {
+    const vessels = new Map();
+    if (existing) for (const v of existing.vessels) vessels.set(String(v.mmsi), v);
+
+    const providers = new Set(existing ? existing.providers : []);
+    let staticCount = existing ? existing.staticCount : 0;
+
+    for (const r of (runResult.results || [])) {
+      providers.add(r.provider);
+      staticCount += (r.staticData || []).length;
+      // index static data by MMSI for this provider run
+      const staticByMmsi = new Map();
+      for (const s of (r.staticData || [])) staticByMmsi.set(String(s.mmsi), s);
+      for (const v of (r.vessels || [])) {
+        const id = String(v.mmsi);
+        const prev = vessels.get(id);
+        const merged = { ...v, provider: r.provider };
+        const st = staticByMmsi.get(id);
+        if (st) merged.shipClass = st.shipClass || classifyShip(st.shipType);
+        if (!merged.shipClass && prev && prev.shipClass) merged.shipClass = prev.shipClass;
+        if (!prev || String(v.lastSeen || "") >= String(prev.lastSeen || "")) {
+          vessels.set(id, { ...prev, ...merged, name: (merged.name && merged.name !== "Unknown vessel") ? merged.name : (prev && prev.name) || merged.name });
+        } else {
+          vessels.set(id, { ...merged, ...prev, shipClass: merged.shipClass || (prev && prev.shipClass) || "UNKNOWN" });
+        }
+      }
+    }
+
+    const list = [...vessels.values()].map(v => ({ ...v, shipClass: v.shipClass || "UNKNOWN" }));
+    return {
+      port: runResult.port,
+      portKey: runResult.portKey,
+      center: runResult.center,
+      providers: [...providers],
+      vessels: list,
+      staticCount,
+      withType: list.filter(v => v.shipClass && v.shipClass !== "UNKNOWN").length,
+      collectedAt: new Date().toISOString(),
+      runs: (existing ? existing.runs : 0) + 1
+    };
+  }
+
+  function render() {
+    const tb = $("rows");
+    tb.innerHTML = PORTS.map(p => {
+      const d = load(p);
+      if (!d) return `<tr><td>${p}</td><td colspan="4" style="color:var(--muted)">no data yet</td>
+        <td><button onclick="clearPort('${p}')" disabled>Clear</button></td></tr>`;
+      return `<tr>
+        <td>${d.port}</td>
+        <td>${d.vessels.length.toLocaleString()}</td>
+        <td>${(d.withType || 0).toLocaleString()}</td>
+        <td>${d.providers.join(" + ")}</td>
+        <td>${d.runs}</td>
+        <td>
+          <button onclick="downloadPort('${p}')">Download JSON</button>
+          <button onclick="clearPort('${p}')">Clear</button>
+        </td></tr>`;
+    }).join("");
+  }
+
+  window.downloadPort = (p) => {
+    const d = load(p);
+    if (!d) return;
+    const blob = new Blob([JSON.stringify(d)], { type: "application/json" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = `snapshot-${p}.json`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  };
+  window.clearPort = (p) => { if (confirm("Delete accumulated data for " + p + "?")) { localStorage.removeItem(key(p)); render(); } };
+
+  $("run").addEventListener("click", async () => {
+    const port = $("port").value;
+    const durationSec = Number($("duration").value);
+    $("run").disabled = true;
+    $("status").innerHTML = `Collecting <b>${port}</b> for ${durationSec}s… keep this tab open.`;
+    try {
+      const res = await fetch("/api/benchmark", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ port, durationSec })
+      });
+      if (!res.ok) throw new Error("HTTP " + res.status);
+      const data = await res.json();
+      const merged = mergeRun(load(port), data);
+      save(port, merged);
+      $("status").innerHTML = `<span class="ok">✓ Run complete.</span> Merged snapshot now has
+        <b>${merged.vessels.length.toLocaleString()}</b> unique vessels
+        (${(merged.withType||0).toLocaleString()} with ship type) across ${merged.runs} run(s).`;
+      render();
+    } catch (err) {
+      $("status").innerHTML = `<span class="warn">✗ ${String(err.message || err)}</span>`;
+    } finally {
+      $("run").disabled = false;
+    }
+  });
+
+  render();
+</script>
+</body>
+</html>

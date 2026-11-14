@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Port &amp; Fleet — Vessel Map</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { color-scheme: dark; --bg:#0b1220; --panel:#111c2e; --muted:#91a2ba; --line:#26364d; --accent:#38bdf8; }
+  * { box-sizing:border-box; }
+  body { margin:0; font-family:Inter,Segoe UI,Arial,sans-serif; background:var(--bg); color:#e8eef7; }
+  header { padding:18px 26px; border-bottom:1px solid var(--line); background:#0e1929; display:flex; align-items:center; gap:20px; flex-wrap:wrap; }
+  header h1 { margin:0 0 4px; font-size:20px; }
+  header p { margin:0; color:var(--muted); font-size:12px; }
+  .nav { margin-left:auto; display:flex; gap:8px; }
+  .nav a { min-height:34px; display:inline-flex; align-items:center; border-radius:8px; border:1px solid #34465f;
+    padding:0 12px; background:#17263b; color:#eef6ff; font-size:12px; text-decoration:none; }
+  main { padding:16px 20px; max-width:1600px; margin:auto; }
+  .cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(230px,1fr)); gap:12px; margin-bottom:14px; }
+  .pcard { background:var(--panel); border:1px solid var(--line); border-left-width:4px; border-radius:12px; padding:13px 16px; }
+  .pcard .name { font-size:14px; font-weight:700; }
+  .pcard .meta { color:var(--muted); font-size:11px; margin-top:2px; }
+  .pcard .nums { display:flex; gap:18px; margin-top:9px; }
+  .pcard .num .v { font-size:21px; font-weight:700; }
+  .pcard .num .k { color:var(--muted); font-size:10px; }
+  .layout { display:grid; grid-template-columns:minmax(0,1fr) 290px; gap:14px; }
+  #map { height:calc(100vh - 300px); min-height:480px; border-radius:12px; border:1px solid var(--line); }
+  .side { display:flex; flex-direction:column; gap:12px; }
+  .panel { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:14px 16px; font-size:12px; }
+  .panel h3 { margin:0 0 10px; font-size:13px; }
+  .panel .li { display:flex; gap:8px; align-items:center; margin-bottom:7px; color:var(--muted); }
+  .dot { width:9px; height:9px; border-radius:50%; flex:none; }
+  .ring-demo { width:11px; height:11px; border-radius:50%; border:2px solid; flex:none; background:transparent; }
+  .note { color:var(--muted); line-height:1.6; }
+  .ctrl { display:flex; gap:10px; margin-bottom:14px; flex-wrap:wrap; align-items:center; }
+  .ctrl select { min-height:34px; border-radius:8px; border:1px solid #34465f; padding:0 10px; background:#17263b; color:#eef6ff; font-size:12px; font-family:inherit; }
+  footer { padding:14px 20px; color:var(--muted); font-size:11px; text-align:center; }
+  @media(max-width:1000px){ .layout { grid-template-columns:1fr; } #map { height:52vh; min-height:380px; } }
+</style>
+</head>
+<body>
+<header>
+  <div>
+    <h1>Vessel Map — Port Congestion Snapshot</h1>
+    <p>AIS snapshot samples per port · vessels coloured by type (AIS ShipStaticData) · collected via the AIS Benchmark endpoint</p>
+  </div>
+  <nav class="nav">
+    <a href="/">← AIS Benchmark</a>
+    <a href="/disruptions.html">Disruption Monitor</a>
+    <a href="/collect.html">+ Collect more data</a>
+  </nav>
+</header>
+<main>
+  <section class="cards" id="portCards"></section>
+  <div class="ctrl">
+    <label for="typeFilter" style="color:var(--muted);font-size:12px;">Vessel type:</label>
+    <select id="typeFilter">
+      <option value="">All types</option>
+      <option value="CARGO">Cargo</option>
+      <option value="TANKER">Tanker</option>
+      <option value="PASSENGER">Passenger</option>
+      <option value="FISHING">Fishing</option>
+      <option value="HIGH_SPEED">High-speed</option>
+      <option value="OTHER">Other</option>
+      <option value="UNKNOWN">Unknown type</option>
+    </select>
+    <span id="countInfo" style="color:var(--muted);font-size:12px;"></span>
+  </div>
+  <section class="layout">
+    <div id="map"></div>
+    <div class="side">
+      <div class="panel">
+        <h3>Legend — vessel type</h3>
+        <div class="li"><span class="dot" style="background:#22c55e"></span> Cargo (AIS 70-79)</div>
+        <div class="li"><span class="dot" style="background:#ef4444"></span> Tanker (AIS 80-89)</div>
+        <div class="li"><span class="dot" style="background:#3b82f6"></span> Passenger (AIS 60-69)</div>
+        <div class="li"><span class="dot" style="background:#b45309"></span> Fishing (AIS 30-39)</div>
+        <div class="li"><span class="dot" style="background:#eab308"></span> High-speed / other (40-49, 90-99)</div>
+        <div class="li"><span class="dot" style="background:#38bdf8"></span> Type not received in window</div>
+        <div class="li"><span class="dot" style="opacity:.45;background:#22c55e"></span> Faded = at anchor (speed &lt; 1 kn)</div>
+      </div>
+      <div class="panel">
+        <h3>Legend — congestion ring</h3>
+        <div class="li"><span class="ring-demo" style="border-color:#ef4444"></span> Heavy anchorage load</div>
+        <div class="li"><span class="ring-demo" style="border-color:#f59e0b"></span> Moderate anchorage load</div>
+        <div class="li"><span class="ring-demo" style="border-color:#34d399"></span> Light anchorage load</div>
+      </div>
+      <div class="panel note">
+        <h3>How to read this</h3>
+        Rings are sized by vessel count in the zone and coloured by the share of vessels
+        at anchor — a congestion proxy. This is a short snapshot sample, not continuous
+        coverage: true waiting-time and dwell analysis requires continuous collection
+        (Railway-based collector, Phase 2 roadmap).
+      </div>
+      <div class="panel note" id="loadInfo">Loading snapshots…</div>
+    </div>
+  </section>
+</main>
+<footer>
+  Vessel positions &amp; types: AISStream &amp; Open Waters snapshot samples · ports from portsmonitor dataset.
+</footer>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const PORTS = ["miami","singapore","rotterdam","shanghai","jebelali"];
+  const TYPE_COLOR = {
+    CARGO: "#22c55e", TANKER: "#ef4444", PASSENGER: "#3b82f6", FISHING: "#b45309",
+    HIGH_SPEED: "#eab308", OTHER: "#eab308", UNKNOWN: "#38bdf8"
+  };
+
+  const map = L.map("map", { worldCopyJump: true }).setView([20, 15], 2);
+  L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    maxZoom: 18, attribution: "&copy; OpenStreetMap contributors"
+  }).addTo(map);
+
+  const vesselLayer = L.layerGroup().addTo(map);
+  const ringLayer = L.layerGroup().addTo(map);
+
+  let allVessels = [];   // {vessel fields, port, portKey}
+  let portMeta = [];     // per-port summary for cards
+
+  function congestionLevel(anchored, total) {
+    if (total < 5) return { color: "#34d399", label: "light" };
+    const share = anchored / total;
+    if (share >= 0.3) return { color: "#ef4444", label: "heavy" };
+    if (share >= 0.15) return { color: "#f59e0b", label: "moderate" };
+    return { color: "#34d399", label: "light" };
+  }
+
+  function esc(s) { return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c])); }
+
+  function renderVessels() {
+    const filter = document.getElementById("typeFilter").value;
+    vesselLayer.clearLayers();
+    const visible = allVessels.filter(x => !filter || x.shipClass === filter);
+    document.getElementById("countInfo").textContent =
+      `${visible.length.toLocaleString()} vessels shown` + (filter ? ` (${filter})` : "");
+
+    for (const v of visible) {
+      if (v.lat == null || v.lon == null) continue;
+      const isAnchored = v.speed !== null && v.speed !== undefined && Number(v.speed) < 1;
+      const color = TYPE_COLOR[v.shipClass] || TYPE_COLOR.UNKNOWN;
+      const m = L.circleMarker([v.lat, v.lon], {
+        radius: isAnchored ? 3 : 3.6, color, weight: 1, fillColor: color,
+        fillOpacity: isAnchored ? 0.35 : 0.75
+      });
+      m.bindTooltip(
+        `${esc(v.name || "Unknown vessel")}<br>` +
+        `MMSI ${esc(v.mmsi)} · ${v.shipClass || "UNKNOWN"}${v.shipTypeText ? " (" + esc(v.shipTypeText) + ")" : ""}<br>` +
+        `${v.speed != null ? Number(v.speed).toFixed(1) + " kn" : "speed n/a"}` +
+        `${isAnchored ? " · AT ANCHOR" : ""} · ${esc(v.provider)} · ${esc(v.port)}`,
+        { direction: "top", offset: [0, -5] });
+      m.addTo(vesselLayer);
+    }
+  }
+
+  async function loadAll() {
+    const loaded = [], missing = [];
+    const results = await Promise.all(PORTS.map(async (p) => {
+      try {
+        const res = await fetch(`/data/snapshot-${p}.json`, { cache: "no-store" });
+        if (!res.ok) throw new Error("HTTP " + res.status);
+        return { p, data: await res.json() };
+      } catch { return { p, data: null }; }
+    }));
+    for (const { p, data } of results) (data ? loaded : missing).push(data ? { p, data } : p);
+
+    if (!loaded.length) {
+      document.getElementById("loadInfo").innerHTML =
+        "No snapshots found. Open <a href='/collect.html' style='color:var(--accent)'>Collect</a>, " +
+        "run 2–3 collections per port, download the JSON files and upload them to <code>public/data/</code>.";
+      return;
+    }
+
+    allVessels = [];
+    const cards = [];
+    for (const { data } of loaded) {
+      const vessels = data.vessels || [];
+      for (const v of vessels) allVessels.push({ ...v, port: data.port });
+      const withPos = vessels.filter(v => v.lat != null && v.lon != null);
+      const anchored = withPos.filter(v => v.speed !== null && v.speed !== undefined && Number(v.speed) < 1);
+      const moving = withPos.length - anchored.length;
+      const avgSpeed = withPos.length
+        ? (withPos.reduce((a, v) => a + (Number(v.speed) || 0), 0) / withPos.length).toFixed(1) : "—";
+      const typed = vessels.filter(v => v.shipClass && v.shipClass !== "UNKNOWN").length;
+      const level = congestionLevel(anchored.length, withPos.length);
+
+      const radiusKm = 3 + Math.min(15, withPos.length / 25);
+      L.circle(data.center, {
+        radius: radiusKm * 1000, color: level.color, weight: 2,
+        fillColor: level.color, fillOpacity: 0.06
+      }).bindTooltip(`${data.port}: ${withPos.length} vessels · ${anchored.length} at anchor (${level.label})`,
+        { direction: "top" }).addTo(ringLayer);
+      L.marker(data.center).bindTooltip(`<b>${esc(data.port)}</b>`, { permanent: true, direction: "top", className: "port-label" }).addTo(ringLayer);
+
+      cards.push(`<div class="pcard" style="border-left-color:${level.color}">
+        <div class="name">${esc(data.port)}</div>
+        <div class="meta">${withPos.length.toLocaleString()} vessels · ${typed.toLocaleString()} typed · ${(data.providers || []).join(" + ")} · ${new Date(data.collectedAt).toLocaleString()}</div>
+        <div class="nums">
+          <div class="num"><div class="v" style="color:var(--accent)">${withPos.length.toLocaleString()}</div><div class="k">IN ZONE</div></div>
+          <div class="num"><div class="v" style="color:#a78bfa">${anchored.length}</div><div class="k">AT ANCHOR</div></div>
+          <div class="num"><div class="v" style="color:#22c55e">${moving}</div><div class="k">UNDER WAY</div></div>
+          <div class="num"><div class="v">${avgSpeed}</div><div class="k">AVG KN</div></div>
+        </div></div>`);
+    }
+
+    document.getElementById("portCards").innerHTML = cards.join("");
+    document.getElementById("loadInfo").innerHTML =
+      `<b>${loaded.length}/5</b> snapshots loaded.` +
+      (missing.length ? `<br>Missing: ${missing.join(", ")} — collect via <a href='/collect.html' style='color:var(--accent)'>/collect.html</a>.` : "") +
+      `<br><br>Snapshots are static samples: refresh them via the collector before an important demo.`;
+
+    renderVessels();
+    const bounds = L.latLngBounds(loaded.map(({ data }) => data.center));
+    if (bounds.isValid()) map.fitBounds(bounds.pad(0.3));
+  }
+
+  document.getElementById("typeFilter").addEventListener("change", renderVessels);
+  loadAll();
+</script>
+<style>.port-label { background:rgba(13,23,39,.85); border:1px solid var(--line); color:#e8eef7; font-weight:700; font-size:11px; border-radius:6px; padding:1px 6px; }</style>
+</body>
+</html>
