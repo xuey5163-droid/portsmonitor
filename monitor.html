@@ -1,0 +1,519 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Global Port Intelligence — Monitor</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+  :root { color-scheme: dark; --bg:#0b1220; --panel:#111c2e; --panel2:#0e1929; --muted:#91a2ba; --line:#26364d; --accent:#38bdf8;
+          --high:#ef4444; --med:#f59e0b; --low:#34d399; --unknown:#94a3b8; }
+  * { box-sizing:border-box; }
+  html,body { margin:0; height:100%; font-family:Inter,Segoe UI,Arial,sans-serif; background:var(--bg); color:#e8eef7; }
+  #app { display:grid; grid-template-columns:370px 1fr; height:100vh; }
+  /* ---------- sidebar ---------- */
+  #sidebar { background:var(--panel2); border-right:1px solid var(--line); display:flex; flex-direction:column; min-height:0; }
+  .brand { padding:14px 16px 10px; border-bottom:1px solid var(--line); }
+  .brand h1 { margin:0; font-size:16px; }
+  .brand .tag { color:var(--muted); font-size:10px; letter-spacing:.6px; text-transform:uppercase; }
+  .links { display:flex; gap:6px; padding:8px 16px; border-bottom:1px solid var(--line); }
+  .links a { flex:1; text-align:center; font-size:11px; color:var(--muted); text-decoration:none; border:1px solid var(--line); border-radius:6px; padding:4px 0; }
+  .links a:hover { color:var(--accent); border-color:var(--accent); }
+  .kpis { display:grid; grid-template-columns:repeat(4,1fr); gap:6px; padding:10px 16px; border-bottom:1px solid var(--line); }
+  .kpi { background:var(--panel); border:1px solid var(--line); border-radius:8px; padding:6px 8px; }
+  .kpi .v { font-size:16px; font-weight:700; }
+  .kpi .k { font-size:9px; color:var(--muted); text-transform:uppercase; letter-spacing:.4px; }
+  .sec { display:flex; flex-direction:column; min-height:0; }
+  .sec-h { padding:9px 16px 7px; font-size:11px; font-weight:700; color:var(--muted); text-transform:uppercase; letter-spacing:.6px;
+           display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .pfilters { display:flex; gap:4px; margin-left:auto; }
+  .pfilters button { font-size:9px; padding:2px 7px; border-radius:10px; border:1px solid var(--line); background:none; color:var(--muted); cursor:pointer; font-family:inherit; }
+  .pfilters button.on { background:var(--accent); border-color:var(--accent); color:#082032; font-weight:700; }
+  .sinput { margin:0 16px 8px; min-height:30px; border-radius:7px; border:1px solid #34465f; padding:0 10px; background:#17263b; color:#eef6ff; font-size:12px; font-family:inherit; }
+  select.sinput { width:calc(100% - 32px); }
+  .rows { overflow-y:auto; min-height:0; }
+  .sec.ports { flex:1 1 42%; }
+  .sec.events { flex:1 1 58%; border-top:1px solid var(--line); }
+  .row-item { padding:8px 16px; border-bottom:1px solid rgba(38,54,77,.55); cursor:pointer; font-size:12px; }
+  .row-item:hover { background:#16233a; }
+  .row-item.selected { background:#1b2f4d; border-left:3px solid var(--accent); padding-left:13px; }
+  .row-item .t { display:flex; align-items:center; gap:7px; font-weight:600; }
+  .row-item .m { color:var(--muted); font-size:10.5px; margin-top:3px; }
+  .dot { width:8px; height:8px; border-radius:50%; flex:none; }
+  .dot.HIGH { background:var(--high);} .dot.MEDIUM { background:var(--med);} .dot.LOW { background:var(--low);} .dot.UNKNOWN { background:var(--unknown);}
+  .dot.NORMAL { background:var(--low);} .dot.BUSY { background:#facc15;} .dot.ELEVATED { background:#f97316;} .dot.SUPPRESSED { background:var(--high);}
+  .badge { font-size:9px; border:1px solid #34465f; border-radius:12px; padding:0 7px; color:var(--muted); white-space:nowrap; }
+  .badge.alert { color:#fca5a5; border-color:rgba(239,68,68,.5); }
+  .badge.warn { color:#fdba74; border-color:rgba(249,115,22,.5); }
+  /* ---------- map & overlays ---------- */
+  #mapwrap { position:relative; min-width:0; }
+  #map { position:absolute; inset:0; }
+  .mapctrl { position:absolute; top:12px; left:12px; z-index:600; display:flex; gap:10px; align-items:center;
+    background:rgba(13,23,39,.9); border:1px solid var(--line); border-radius:9px; padding:7px 12px; font-size:11px; color:var(--muted); flex-wrap:wrap; max-width:calc(100% - 24px); }
+  .mapctrl label { display:flex; gap:4px; align-items:center; margin:0; color:#e8eef7; font-size:11px; cursor:pointer; }
+  .mapctrl select { min-height:26px; border-radius:6px; border:1px solid #34465f; padding:0 8px; background:#17263b; color:#eef6ff; font-size:11px; font-family:inherit; }
+  #legend { position:absolute; bottom:14px; left:12px; z-index:600; background:rgba(13,23,39,.9); border:1px solid var(--line);
+    border-radius:9px; padding:8px 12px; font-size:10.5px; color:var(--muted); line-height:1.85; max-width:250px; }
+  #legend .dot { width:8px; height:8px; }
+  #detail { position:absolute; top:12px; right:12px; z-index:700; width:335px; max-height:calc(100% - 24px); overflow-y:auto;
+    background:rgba(13,23,39,.96); border:1px solid var(--line); border-radius:12px; padding:14px 16px; display:none; }
+  #detail.open { display:block; }
+  #detail h3 { margin:0 30px 4px 0; font-size:15px; }
+  #detail .close { position:absolute; top:8px; right:10px; background:none; border:none; color:var(--muted); font-size:18px; cursor:pointer; }
+  #detail .sub { color:var(--muted); font-size:11px; margin-bottom:9px; }
+  .sev { font-size:10px; font-weight:700; border-radius:20px; padding:2px 10px; display:inline-block; margin-bottom:9px; }
+  .sev.HIGH { background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.4); }
+  .sev.MEDIUM { background:rgba(245,158,11,.15); color:#fcd34d; border:1px solid rgba(245,158,11,.4); }
+  .sev.LOW { background:rgba(52,211,153,.15); color:#6ee7b7; border:1px solid rgba(52,211,153,.4); }
+  .sev.UNKNOWN { background:rgba(148,163,184,.12); color:#cbd5e1; border:1px solid rgba(148,163,184,.35); }
+  .pstat { font-size:10px; font-weight:700; border-radius:20px; padding:2px 10px; display:inline-block; margin-bottom:9px; }
+  .pstat.NORMAL { background:rgba(52,211,153,.15); color:#6ee7b7; border:1px solid rgba(52,211,153,.4); }
+  .pstat.BUSY { background:rgba(250,204,21,.14); color:#fde047; border:1px solid rgba(250,204,21,.4); }
+  .pstat.ELEVATED { background:rgba(249,115,22,.15); color:#fdba74; border:1px solid rgba(249,115,22,.4); }
+  .pstat.SUPPRESSED { background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.4); }
+  .pstat.UNKNOWN, .pstat.NO { background:rgba(148,163,184,.12); color:#cbd5e1; border:1px solid rgba(148,163,184,.35); }
+  .kv { display:grid; grid-template-columns:105px 1fr; gap:5px 10px; font-size:12px; margin:0 0 10px; }
+  .kv dt { color:var(--muted); } .kv dd { margin:0; word-break:break-word; }
+  #detail a { color:var(--accent); font-size:12px; word-break:break-all; }
+  .note { color:var(--muted); font-size:11px; line-height:1.55; border-top:1px solid var(--line); padding-top:9px; }
+  .ports-h { font-size:10px; color:var(--muted); margin:2px 0 5px; text-transform:uppercase; letter-spacing:.4px; }
+  .port-row { display:flex; align-items:center; gap:7px; font-size:12px; padding:4px 0; border-bottom:1px solid rgba(38,54,77,.5); cursor:pointer; }
+  .port-row:hover { color:var(--accent); }
+  .port-row .pname { flex:1; }
+  .pe { font-size:9px; font-weight:700; border-radius:11px; padding:1px 7px; flex:none; }
+  .pe.CRITICAL { background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.4); }
+  .pe.HIGH { background:rgba(245,158,11,.15); color:#fcd34d; border:1px solid rgba(245,158,11,.4); }
+  .pe.WATCH { background:rgba(56,189,248,.12); color:#7dd3fc; border:1px solid rgba(56,189,248,.35); }
+  .pd { color:var(--muted); font-size:10.5px; flex:none; }
+  .vessel-arrow { background:none; border:none; }
+  .attr-foot { position:absolute; bottom:2px; right:6px; z-index:600; font-size:9px; color:#5b6b82; background:rgba(13,23,39,.7); padding:0 4px; border-radius:3px; }
+  @media(max-width:900px){ #app { grid-template-columns:1fr; } #sidebar { display:none; } }
+</style>
+</head>
+<body>
+<div id="app">
+  <aside id="sidebar">
+    <div class="brand">
+      <h1>Global Port Intelligence</h1>
+      <div class="tag">Disruption &amp; congestion monitor · mockup</div>
+    </div>
+    <div class="links">
+      <a href="/">AIS Benchmark</a><a href="/collect.html">Collector</a><a href="/disruptions.html">Events page</a>
+    </div>
+    <div class="kpis">
+      <div class="kpi"><div class="v" id="kEvents">—</div><div class="k">Events</div></div>
+      <div class="kpi"><div class="v" id="kAbnormal" style="color:var(--high)">—</div><div class="k">Ports abnormal</div></div>
+      <div class="kpi"><div class="v" id="kExposed">—</div><div class="k">Ports exposed</div></div>
+      <div class="kpi"><div class="v" id="kVessels">—</div><div class="k">Vessels</div></div>
+    </div>
+
+    <section class="sec ports">
+      <div class="sec-h">Ports
+        <div class="pfilters" id="pFilters">
+          <button data-f="all" class="on">All</button>
+          <button data-f="congested">Congested</button>
+          <button data-f="exposed">Exposed</button>
+          <button data-f="data">With data</button>
+        </div>
+      </div>
+      <input class="sinput" type="search" id="pSearch" placeholder="Search port / country…">
+      <div class="rows" id="portRows"></div>
+    </section>
+
+    <section class="sec events">
+      <div class="sec-h">Disruption events</div>
+      <select class="sinput" id="eType">
+        <option value="">All types</option>
+        <option value="EARTHQUAKE">Earthquake</option>
+        <option value="TROPICAL_CYCLONE">Tropical cyclone</option>
+        <option value="FLOOD">Flood</option>
+        <option value="VOLCANO">Volcano</option>
+        <option value="DROUGHT">Drought</option>
+        <option value="WILDFIRE">Wildfire</option>
+        <option value="CONFLICT">Conflict / war</option>
+        <option value="SHIPPING_INCIDENT">Shipping incident</option>
+        <option value="PORT_DISRUPTION">Port disruption</option>
+      </select>
+      <input class="sinput" type="search" id="eSearch" placeholder="Search events…" style="margin-top:6px">
+      <div class="rows" id="eventRows"></div>
+    </section>
+  </aside>
+
+  <div id="mapwrap">
+    <div id="map"></div>
+    <div class="mapctrl">
+      <label><input type="checkbox" id="tVessels" checked> Vessels</label>
+      <label><input type="checkbox" id="tPorts" checked> Ports</label>
+      <label><input type="checkbox" id="tEvents" checked> Events</label>
+      <span style="color:#5b6b82">|</span>
+      <select id="vType">
+        <option value="">All types</option>
+        <option value="CARGO">Cargo</option>
+        <option value="TANKER">Tanker</option>
+        <option value="PASSENGER">Passenger</option>
+        <option value="FISHING">Fishing</option>
+        <option value="HIGH_SPEED">High-speed</option>
+        <option value="OTHER">Other</option>
+      </select>
+      <span id="vCount" style="color:var(--muted)"></span>
+    </div>
+    <div id="legend">
+      <div style="color:#e8eef7;font-weight:700;margin-bottom:2px">Vessel type</div>
+      <div><span class="dot" style="background:#22c55e"></span> Cargo &nbsp;<span class="dot" style="background:#ef4444"></span> Tanker</div>
+      <div><span class="dot" style="background:#3b82f6"></span> Passenger &nbsp;<span class="dot" style="background:#b45309"></span> Fishing</div>
+      <div><span class="dot" style="background:#eab308"></span> High-speed/other &nbsp;<span class="dot" style="background:#38bdf8"></span> Unknown</div>
+      <div style="color:#e8eef7;font-weight:700;margin:5px 0 2px;border-top:1px solid var(--line);padding-top:5px">Ports (PortWatch baseline)</div>
+      <div><span class="dot NORMAL"></span> Normal <span class="dot BUSY"></span> Busy</div>
+      <div><span class="dot ELEVATED"></span> Elevated <span class="dot SUPPRESSED"></span> Suppressed</div>
+      <div><span class="dot UNKNOWN"></span> No baseline data</div>
+    </div>
+    <div id="detail"></div>
+    <div class="attr-foot">Basemap © OpenStreetMap · CARTO · PortWatch · GDACS · USGS</div>
+  </div>
+</div>
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script>
+  const $ = (id) => document.getElementById(id);
+  const fmt = (n) => Number(n || 0).toLocaleString();
+  const fmtTime = (iso) => iso ? new Date(iso).toLocaleString(undefined, { dateStyle:"medium", timeStyle:"short", timeZone:"UTC" }) + " UTC" : "—";
+  const str = (v) => (v === null || v === undefined) ? "" : String(v);
+  const esc = (s) => String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+  const TYPE_LABEL = { EARTHQUAKE:"Earthquake", TROPICAL_CYCLONE:"Cyclone", FLOOD:"Flood", VOLCANO:"Volcano",
+    DROUGHT:"Drought", WILDFIRE:"Wildfire", CONFLICT:"Conflict", SHIPPING_INCIDENT:"Incident", PORT_DISRUPTION:"Port disruption", OTHER:"Other" };
+  const SEV_COLOR = { HIGH:"#ef4444", MEDIUM:"#f59e0b", LOW:"#34d399", UNKNOWN:"#94a3b8" };
+  const TYPE_COLOR = { CARGO:"#22c55e", TANKER:"#ef4444", PASSENGER:"#3b82f6", FISHING:"#b45309",
+    HIGH_SPEED:"#eab308", OTHER:"#eab308", UNKNOWN:"#38bdf8" };
+  const PORT_COLOR = { NORMAL:"#34d399", BUSY:"#facc15", ELEVATED:"#f97316", SUPPRESSED:"#ef4444", UNKNOWN:"#64748b" };
+  const SNAPSHOT_PORTS = ["miami","singapore","rotterdam","shanghai","jebelali","losangeles","newyork","savannah","houston","portsaid","colombo","busan"];
+
+  const map = L.map("map", { worldCopyJump:true, zoomControl:true }).setView([25, 60], 3);
+  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
+    maxZoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO"
+  }).addTo(map);
+
+  const vesselsLayer = L.layerGroup().addTo(map);
+  const portsLayer = L.layerGroup().addTo(map);
+  const eventsLayer = L.layerGroup().addTo(map);
+  const exposureLayer = L.layerGroup().addTo(map);
+
+  let rawEvents = [], allPorts = [], allVessels = [];
+  let exposureByEvent = new Map(), exposureByPort = new Map(), portStatusById = new Map();
+  let snapshotByCenter = [];
+  let selected = null;
+  let portFilter = "all";
+
+  /* ---------------- data ---------------- */
+  async function loadAll() {
+    const res = await fetch("/api/disruptions?days=30&usgsFeed=magnitude45");
+    const data = await res.json();
+    rawEvents = data.events || [];
+    $("kEvents").textContent = fmt(rawEvents.length);
+
+    try {
+      const ex = await (await fetch("/api/port-exposure?days=30&usgsFeed=magnitude45")).json();
+      allPorts = ex.ports || [];
+      exposureByEvent = new Map((ex.exposures || []).map(x => [x.event_id, x]));
+      const byPort = new Map();
+      for (const x of (ex.exposures || [])) for (const p of x.ports) {
+        if (!byPort.has(p.id)) byPort.set(p.id, []);
+        byPort.get(p.id).push({ event_id: x.event_id, exposure: p.exposure, distance_km: p.distance_km, title: x.title, severity: x.severity, status: x.status });
+      }
+      exposureByPort = byPort;
+      $("kExposed").textContent = fmt(byPort.size);
+    } catch {}
+
+    try {
+      const ps = await (await fetch("/api/port-status")).json();
+      portStatusById = new Map((ps.ports || []).map(p => [p.id, p]));
+      $("kAbnormal").textContent = fmt((ps.ports || []).filter(p => p.status === "ELEVATED" || p.status === "SUPPRESSED").length);
+    } catch {}
+
+    // vessel snapshots (optional)
+    const snaps = await Promise.all(SNAPSHOT_PORTS.map(async (k) => {
+      try { const r = await fetch(`/data/snapshot-${k}.json`, { cache:"no-store" }); if (!r.ok) return null; return await r.json(); }
+      catch { return null; }
+    }));
+    for (const s of snaps) if (s) {
+      snapshotByCenter.push(s);
+      for (const v of (s.vessels || [])) allVessels.push({ ...v, _port: s.port, _center: s.center });
+    }
+    $("kVessels").textContent = fmt(allVessels.length);
+
+    renderPorts(); renderEvents(); renderPortsLayer(); renderVessels(); renderEventsLayer();
+    const ab = allPorts.find(p => { const st = portStatusById.get(p.id); return st && (st.status === "ELEVATED" || st.status === "SUPPRESSED"); });
+    if (ab) selectPort(ab.id, false); else if (rawEvents.length) selectEvent(rawEvents[0].event_id, false);
+  }
+
+  /* ---------------- vessels ---------------- */
+  function vesselIcon(v) {
+    const anchored = v.speed !== null && v.speed !== undefined && Number(v.speed) < 1;
+    const color = TYPE_COLOR[v.shipClass] || TYPE_COLOR.UNKNOWN;
+    const h = v.heading != null ? Number(v.heading) : null;
+    if (h === null) {
+      return L.divIcon({ className:"vessel-arrow",
+        html: `<div style="width:9px;height:9px;border-radius:50%;background:${color};opacity:${anchored?0.45:0.95};border:1px solid #0b1220"></div>`,
+        iconSize:[9,9], iconAnchor:[4,4] });
+    }
+    return L.divIcon({ className:"vessel-arrow",
+      html: `<svg width="17" height="17" viewBox="0 0 17 17" style="transform:rotate(${h}deg)"><path d="M8.5 1.2 L14 14.5 L8.5 11 L3 14.5 Z" fill="${color}" fill-opacity="${anchored?0.45:0.95}" stroke="#0b1220" stroke-width="0.9"/></svg>`,
+      iconSize:[17,17], iconAnchor:[8,8] });
+  }
+
+  function renderVessels() {
+    vesselsLayer.clearLayers();
+    if (!$("tVessels").checked) return;
+    const tf = $("vType").value;
+    const vis = allVessels.filter(v => v.lat != null && v.lon != null && (!tf || v.shipClass === tf));
+    $("vCount").textContent = fmt(vis.length) + " vessels" + (tf ? ` · ${tf}` : "");
+    for (const v of vis) {
+      const anchored = v.speed !== null && v.speed !== undefined && Number(v.speed) < 1;
+      L.marker([v.lat, v.lon], { icon: vesselIcon(v) })
+        .bindTooltip(`${esc(v.name || "Unknown vessel")}<br>MMSI ${esc(v.mmsi)} · ${v.shipClass || "UNKNOWN"}<br>${v.speed != null ? Number(v.speed).toFixed(1) + " kn" : "speed n/a"}${anchored ? " · AT ANCHOR" : ""}${v.heading != null ? " · hdg " + Math.round(v.heading) + "°" : ""}<br>${esc(v._port)} snapshot`,
+          { direction:"top", offset:[0,-6] })
+        .addTo(vesselsLayer);
+    }
+  }
+
+  /* ---------------- ports ---------------- */
+  function snapshotNear(port) {
+    for (const s of snapshotByCenter) {
+      const d = Math.hypot(s.center[0] - port.lat, s.center[1] - port.lon);
+      if (d < 0.6) return s;
+    }
+    return null;
+  }
+
+  function portMatchesFilter(p) {
+    const st = portStatusById.get(p.id);
+    const abnormal = st && (st.status === "ELEVATED" || st.status === "SUPPRESSED");
+    const exposed = exposureByPort.has(p.id);
+    const hasData = !!snapshotNear(p);
+    if (portFilter === "congested") return abnormal;
+    if (portFilter === "exposed") return exposed;
+    if (portFilter === "data") return hasData;
+    return true;
+  }
+
+  function renderPorts() {
+    const q = $("pSearch").value.trim().toLowerCase();
+    const list = allPorts.filter(p => portMatchesFilter(p) &&
+      (!q || (p.name + " " + p.country + " " + p.id).toLowerCase().includes(q)));
+    $("portRows").innerHTML = list.map(p => {
+      const st = portStatusById.get(p.id);
+      const exp = exposureByPort.get(p.id) || [];
+      const activeExp = exp.filter(e => e.status === "ACTIVE");
+      const snap = snapshotNear(p);
+      const abnormal = st && (st.status === "ELEVATED" || st.status === "SUPPRESSED");
+      return `<div class="row-item ${selected && selected.kind === "port" && selected.id === p.id ? "selected" : ""}" data-pid="${p.id}">
+        <div class="t"><span class="dot ${st ? st.status : "UNKNOWN"}"></span>${esc(p.name)}
+          ${abnormal ? `<span class="badge alert">${st.status}</span>` : ""}
+          ${activeExp.length ? `<span class="badge warn">exposed ×${activeExp.length}</span>` : ""}
+          ${snap ? `<span class="badge">${(snap.vessels||[]).length} vessels</span>` : ""}
+        </div>
+        <div class="m">${esc(p.country)} · ${p.id}${st && st.ratio != null ? " · " + st.ratio + "× baseline" : ""}</div>
+      </div>`;
+    }).join("") || `<div style="padding:14px;color:var(--muted);font-size:11px">No ports match this filter.</div>`;
+    document.querySelectorAll("#portRows .row-item").forEach(el =>
+      el.addEventListener("click", () => selectPort(el.dataset.pid, true)));
+  }
+
+  function renderPortsLayer() {
+    portsLayer.clearLayers();
+    if (!$("tPorts").checked) return;
+    for (const p of allPorts) {
+      const st = portStatusById.get(p.id);
+      const color = st ? (PORT_COLOR[st.status] || PORT_COLOR.UNKNOWN) : "#38bdf8";
+      const c = L.circleMarker([p.lat, p.lon], { radius: st ? 5 : 4, color, weight: 1.4, fillColor: color, fillOpacity: 0.55 });
+      c.bindTooltip(`${esc(p.name)} (${esc(p.country)})${st && st.status !== "UNKNOWN" ? "<br>" + st.status + " · " + st.ratio + "x baseline · PortWatch" : ""}`, { direction:"top", offset:[0,-6] });
+      c.on("click", () => selectPort(p.id, true));
+      c.addTo(portsLayer);
+    }
+  }
+
+  function sparkline(series, baseline) {
+    if (!series || series.length < 2) return "";
+    const w = 300, h = 62, pad = 4;
+    const max = Math.max(...series.map(s => s.portcalls), baseline || 0, 1);
+    const x = i => pad + i * (w - 2*pad) / (series.length - 1);
+    const y = v => h - pad - (v / max) * (h - 2*pad);
+    const pts = series.map((s,i) => `${x(i).toFixed(1)},${y(s.portcalls).toFixed(1)}`).join(" ");
+    const base = baseline != null ? `<line x1="${pad}" y1="${y(baseline)}" x2="${w-pad}" y2="${y(baseline)}" stroke="#91a2ba" stroke-width="1" stroke-dasharray="3 3"/>` : "";
+    return `<svg width="${w}" height="${h}" style="display:block;margin:4px 0 2px"><polyline points="${pts}" fill="none" stroke="#38bdf8" stroke-width="1.5"/>${base}</svg>`;
+  }
+
+  function selectPort(id, fly) {
+    const p = allPorts.find(x => x.id === id);
+    if (!p) return;
+    selected = { kind: "port", id };
+    const st = portStatusById.get(id);
+    const exp = exposureByPort.get(id) || [];
+    const active = exp.filter(e => e.status === "ACTIVE");
+    const snap = snapshotNear(p);
+    renderPorts(); unselectEventRows();
+
+    const rows = [
+      ["LOCODE", p.id], ["Country", p.country],
+      st && st.status !== "UNKNOWN" ? ["Status", st.status] : null,
+      st && st.ratio != null ? ["Activity", st.ratio + "x of baseline median"] : null,
+      st && st.baseline_median != null ? ["Baseline", st.baseline_median + " calls/day"] : null,
+      st && st.current_7d_avg != null ? ["Last 7d avg", st.current_7d_avg + " calls/day"] : null,
+      st ? ["Data to", st.data_last_date || "—"] : null,
+      snap ? ["AIS snapshot", `${(snap.vessels||[]).length} vessels · ${new Date(snap.collectedAt).toLocaleString()}`] : null
+    ].filter(Boolean);
+
+    $("detail").innerHTML = `
+      <button class="close" id="dClose">×</button>
+      <h3>${esc(p.name)}</h3>
+      <div class="sub">${p.lat.toFixed(3)}, ${p.lon.toFixed(3)}</div>
+      <div><span class="pstat ${st ? st.status : "NO"}">${st ? st.status : "NO BASELINE DATA"}</span></div>
+      <dl class="kv">${rows.map(([k,v]) => `<dt>${k}</dt><dd>${esc(str(v))}</dd>`).join("")}</dl>
+      ${st && st.series && st.series.length > 1 ? `<div class="ports-h">Daily port calls · last ${st.series.length} days (PortWatch)</div>${sparkline(st.series, st.baseline_median)}` : ""}
+      ${exp.length ? `<div class="ports-h">Disruption exposure · distance screening</div>` + exp.slice(0,8).map(e =>
+        `<div class="port-row" data-eid="${e.event_id}"><span class="pe ${e.exposure}">${e.exposure}</span><span class="pname">${esc(e.title)}</span><span class="pd">${e.distance_km} km</span></div>`).join("") : ""}
+      <div class="note" style="margin-top:8px">Baseline: IMF PortWatch (weekly). Exposure: geographic screening only — proximity does not confirm operational impact. Snapshot: short AIS sample, not continuous coverage.</div>`;
+    $("detail").classList.add("open");
+    $("dClose").onclick = closeDetail;
+    $("detail").querySelectorAll(".port-row").forEach(el =>
+      el.addEventListener("click", () => selectEvent(el.dataset.eid, true)));
+    if (fly) map.setView([p.lat, p.lon], 9, { animate:true });
+  }
+
+  /* ---------------- events ---------------- */
+  function renderEvents() {
+    const q = $("eSearch").value.trim().toLowerCase();
+    const tf = $("eType").value;
+    const list = rawEvents.filter(e =>
+      (!tf || e.event_type === tf) &&
+      (!q || (e.title + " " + (e.affected_countries || "") + (TYPE_LABEL[e.event_type] || "")).toLowerCase().includes(q)));
+    $("eventRows").innerHTML = list.map(e => `
+      <div class="row-item ${selected && selected.kind === "event" && selected.id === e.event_id ? "selected" : ""}" data-eid="${e.event_id}">
+        <div class="t"><span class="dot ${e.severity}"></span>${esc(str(e.title))}<span class="badge">${TYPE_LABEL[e.event_type] || esc(e.event_type)}</span></div>
+        <div class="m">${str(e.source)} · ${fmtTime(e.occurred_at)}${e.affected_countries ? " · " + esc(str(e.affected_countries)) : ""}</div>
+      </div>`).join("") || `<div style="padding:14px;color:var(--muted);font-size:11px">No events match.</div>`;
+    document.querySelectorAll("#eventRows .row-item").forEach(el =>
+      el.addEventListener("click", () => selectEvent(el.dataset.eid, true)));
+  }
+
+  function geometryLayers(e) {
+    const color = SEV_COLOR[e.severity] || SEV_COLOR.UNKNOWN;
+    const layers = [];
+    const add = (g) => {
+      if (!g || !g.type) return;
+      const st = { color, weight: 1.5, fillColor: color, fillOpacity: 0.12 };
+      if (g.type === "Polygon") layers.push(L.polygon(g.coordinates[0].map(c=>[c[1],c[0]]), st));
+      else if (g.type === "MultiPolygon") g.coordinates.forEach(p=>layers.push(L.polygon(p[0].map(c=>[c[1],c[0]]), st)));
+      else if (g.type === "LineString") layers.push(L.polyline(g.coordinates.map(c=>[c[1],c[0]]), { color, weight: 2.5 }));
+      else if (g.type === "MultiLineString") g.coordinates.forEach(l=>layers.push(L.polyline(l.map(c=>[c[1],c[0]]), { color, weight: 2.5 })));
+      else if (g.type === "GeometryCollection") (g.geometries||[]).forEach(add);
+    };
+    add(e.geometry);
+    return layers;
+  }
+
+  function renderEventsLayer() {
+    eventsLayer.clearLayers();
+    if (!$("tEvents").checked) return;
+    for (const e of rawEvents) {
+      for (const l of geometryLayers(e)) { l.on("click", () => selectEvent(e.event_id, false)); l.addTo(eventsLayer); }
+      if (e.latitude != null && e.longitude != null) {
+        const r = e.event_type === "EARTHQUAKE" && e.magnitude != null ? Math.min(17, 4 + e.magnitude*1.6) : ({HIGH:10, MEDIUM:8, LOW:6, UNKNOWN:5}[e.severity] || 5);
+        const m = L.circleMarker([e.latitude, e.longitude], { radius: r, color: SEV_COLOR[e.severity] || SEV_COLOR.UNKNOWN, weight: 1.5, fillColor: SEV_COLOR[e.severity] || SEV_COLOR.UNKNOWN, fillOpacity: 0.5 });
+        m.on("click", () => selectEvent(e.event_id, false));
+        m.addTo(eventsLayer);
+      }
+    }
+  }
+
+  function selectEvent(id, fly) {
+    const e = rawEvents.find(x => x.event_id === id);
+    if (!e) return;
+    selected = { kind: "event", id };
+    renderEvents(); renderPorts(); unselectPortRows();
+
+    const url = typeof e.source_url === "string" && /^https?:\/\//i.test(e.source_url) ? e.source_url : null;
+    const exposure = exposureByEvent.get(id);
+    const geomType = e.geometry && e.geometry.type ? e.geometry.type : null;
+
+    const rows = [
+      ["Type", TYPE_LABEL[e.event_type] || str(e.event_type)],
+      ["Source", str(e.source)],
+      ["Occurred", fmtTime(e.occurred_at)],
+      e.magnitude != null ? ["Magnitude", "M" + e.magnitude] : null,
+      e.depth_km != null ? ["Depth", e.depth_km + " km"] : null,
+      ["Status", str(e.status) + " · " + str(e.verification)],
+      e.affected_countries ? ["Countries", str(e.affected_countries)] : null
+    ].filter(Boolean);
+
+    let exposureHtml = "";
+    if (exposure && exposure.ports.length) {
+      exposureHtml = `<div class="ports-h">Ports potentially exposed · ${exposure.radius_km} km screening</div>` +
+        exposure.ports.slice(0, 10).map(p => {
+          const st = portStatusById.get(p.id);
+          const abnormal = st && (st.status === "ELEVATED" || st.status === "SUPPRESSED");
+          return `<div class="port-row" data-pid="${p.id}">
+            <span class="pe ${p.exposure}">${p.exposure}</span>
+            <span class="pname">${esc(p.name)}${abnormal ? ` <span class="badge alert" style="font-size:8.5px">activity ${st.status}</span>` : ""}</span>
+            <span class="pd">${p.distance_km} km</span></div>`;
+        }).join("") + (exposure.ports.length > 10 ? `<div style="color:var(--muted);font-size:10px;padding-top:4px">+${exposure.ports.length-10} more</div>` : "");
+    }
+
+    $("detail").innerHTML = `
+      <button class="close" id="dClose">×</button>
+      <h3>${esc(str(e.title))}</h3>
+      <div class="sub">${e.latitude != null ? e.latitude.toFixed(3) + ", " + e.longitude.toFixed(3) : "location unavailable"}</div>
+      <div><span class="sev ${e.severity}">${str(e.severity)}</span></div>
+      <dl class="kv">${rows.map(([k,v]) => `<dt>${k}</dt><dd>${esc(str(v))}</dd>`).join("")}</dl>
+      ${e.description ? `<dl class="kv"><dt>Details</dt><dd>${esc(str(e.description).replace(/<[^>]*>/g, " "))}</dd></dl>` : ""}
+      ${url ? `<a href="${url.replace(/"/g, "&quot;")}" target="_blank" rel="noopener">Open source report ↗</a>` : ""}
+      ${exposureHtml}
+      <div class="note" style="margin-top:8px">Severity is an internal display category, not an official impact assessment. Exposure is geographic screening only; "activity abnormal" = the port's PortWatch baseline is currently deviating (${"ELEVATED/SUPPRESSED"}) — a screening signal, not confirmation.</div>
+      ${e.verification === "CURATED_STATIC" ? `<div class="note">Hand-curated static mockup record pending an automated feed.</div>` : ""}`;
+    $("detail").classList.add("open");
+    $("dClose").onclick = closeDetail;
+    $("detail").querySelectorAll(".port-row").forEach(el =>
+      el.addEventListener("click", () => selectPort(el.dataset.pid, true)));
+
+    // exposure links on map
+    exposureLayer.clearLayers();
+    if (exposure) {
+      const EXP_COLOR = { CRITICAL:"#ef4444", HIGH:"#f59e0b", WATCH:"#38bdf8" };
+      const center = e.latitude != null ? [e.latitude, e.longitude] : null;
+      exposure.ports.forEach(p => {
+        const color = EXP_COLOR[p.exposure] || "#38bdf8";
+        L.circleMarker([p.lat, p.lon], { radius: 6.5, color, weight: 2, fillColor: color, fillOpacity: 0.85 })
+          .bindTooltip(`${esc(p.name)} · ${p.exposure} · ${p.distance_km} km`, { direction:"top", offset:[0,-8] })
+          .on("click", () => selectPort(p.id, true)).addTo(exposureLayer);
+        if (center) L.polyline([center, [p.lat, p.lon]], { color, weight: 1.5, dashArray:"4 4", opacity: 0.65 }).addTo(exposureLayer);
+      });
+    }
+    if (fly && e.latitude != null) map.setView([e.latitude, e.longitude], 6, { animate:true });
+  }
+
+  function closeDetail() {
+    $("detail").classList.remove("open");
+    exposureLayer.clearLayers();
+    selected = null;
+    unselectPortRows(); unselectEventRows();
+  }
+  function unselectPortRows() { document.querySelectorAll("#portRows .row-item").forEach(el => el.classList.remove("selected")); }
+  function unselectEventRows() { document.querySelectorAll("#eventRows .row-item").forEach(el => el.classList.remove("selected")); }
+
+  /* ---------------- wiring ---------------- */
+  $("pFilters").querySelectorAll("button").forEach(b => b.addEventListener("click", () => {
+    $("pFilters").querySelectorAll("button").forEach(x => x.classList.remove("on"));
+    b.classList.add("on");
+    portFilter = b.dataset.f;
+    renderPorts();
+  }));
+  $("pSearch").addEventListener("input", renderPorts);
+  $("eSearch").addEventListener("input", renderEvents);
+  $("eType").addEventListener("change", renderEvents);
+  $("vType").addEventListener("change", renderVessels);
+  $("tVessels").addEventListener("change", renderVessels);
+  $("tPorts").addEventListener("change", renderPortsLayer);
+  $("tEvents").addEventListener("change", renderEventsLayer);
+
+  loadAll();
+</script>
+</body>
+</html>
