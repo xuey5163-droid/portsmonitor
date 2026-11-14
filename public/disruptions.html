@@ -19,8 +19,9 @@
     .nav a.primary, .nav button.primary { background:#0284c7; border-color:#0284c7; }
     .nav button:disabled { opacity:.5; cursor:not-allowed; }
     main { padding:16px 20px; max-width:1600px; margin:auto; }
-    .kpis { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+    .kpis { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
     .kpi { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:13px 15px; }
+    .kpi .value.watch { color:var(--accent); }
     .kpi .name { color:var(--muted); font-size:11px; }
     .kpi .value { font-size:25px; font-weight:700; margin-top:5px; }
     .kpi .value.high { color:var(--high); }
@@ -62,6 +63,15 @@
     .kv dt { color:var(--muted); } .kv dd { margin:0; word-break:break-word; }
     .detail a { color:var(--accent); font-size:12px; word-break:break-all; }
     .detail .note { color:var(--muted); font-size:11px; line-height:1.5; border-top:1px solid var(--line); padding-top:10px; }
+    .ports-h { font-size:11px; color:var(--muted); margin:2px 0 6px; text-transform:uppercase; letter-spacing:.4px; }
+    .port-row { display:flex; align-items:center; gap:8px; font-size:12px; padding:5px 0; border-bottom:1px solid rgba(38,54,77,.5); cursor:pointer; }
+    .port-row:hover { color:var(--accent); }
+    .port-row .pname { flex:1; }
+    .pe { font-size:9px; font-weight:700; border-radius:12px; padding:1px 7px; flex:none; }
+    .pe.CRITICAL { background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.4); }
+    .pe.HIGH { background:rgba(245,158,11,.15); color:#fcd34d; border:1px solid rgba(245,158,11,.4); }
+    .pe.WATCH { background:rgba(56,189,248,.12); color:#7dd3fc; border:1px solid rgba(56,189,248,.35); }
+    .pd { color:var(--muted); font-size:11px; flex:none; }
     .statusbar { padding:9px 12px; color:var(--muted); font-size:11px; border-top:1px solid var(--line); }
     .src-ok { color:#6ee7b7; } .src-err { color:#fca5a5; }
     footer { padding:16px 20px; color:var(--muted); font-size:11px; text-align:center; }
@@ -98,6 +108,7 @@
     <div class="kpi"><div class="name">High severity</div><div class="value high" id="kHigh">—</div><div class="sub">Internal display category</div></div>
     <div class="kpi"><div class="name">Earthquakes</div><div class="value" id="kEq">—</div><div class="sub" id="kEqSub">—</div></div>
     <div class="kpi"><div class="name">Conflict &amp; incidents</div><div class="value" id="kStorm">—</div><div class="sub">War / vessel incidents / port disruption</div></div>
+    <div class="kpi"><div class="name">Ports potentially exposed</div><div class="value watch" id="kPorts">—</div><div class="sub" id="kPortsSub">—</div></div>
     <div class="kpi"><div class="name">Sources online</div><div class="value" id="kSources">—</div><div class="sub" id="kSourcesSub">—</div></div>
   </section>
 
@@ -162,6 +173,7 @@
         <div><span class="dot LOW"></span>Low severity</div>
         <div><span class="dot UNKNOWN"></span>Unknown / no rating</div>
         <div style="margin-top:4px;border-top:1px solid var(--line);padding-top:4px">Polygons &amp; lines show source-provided impact areas and tracks (cyclone tracks, affected regions, blocked lanes)</div>
+        <div><label style="display:flex;align-items:center;gap:6px;margin:0;color:#eef6ff;font-size:11px;"><input type="checkbox" id="togglePorts" checked> Ports layer</label></div>
       </div>
       <aside class="detail" id="detail"></aside>
     </div>
@@ -170,6 +182,7 @@
 <footer>
   Natural-hazard events reported by USGS and GDACS. “Severity” is an internal display category, not an official impact assessment.
   Conflict / incident layer is hand-curated static mockup data (verification: CURATED_STATIC) pending an automated news feed.
+  Port exposure is a geographic distance screening only — proximity does not confirm operational impact.
   Sources: Global Disaster Alert and Coordination System (GDACS) · U.S. Geological Survey (USGS).
 </footer>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -190,8 +203,12 @@
     attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
   }).addTo(map);
   const eventLayer = L.layerGroup().addTo(map);
+  const portsLayer = L.layerGroup().addTo(map);
+  const exposureLayer = L.layerGroup().addTo(map);
 
   let rawEvents = [];
+  let allPorts = [];
+  let exposureByEvent = new Map();
   let selectedId = null;
   let refreshTimer = null;
 
@@ -268,6 +285,14 @@
     }
 
     eventLayer.clearLayers();
+    portsLayer.clearLayers();
+    for (const p of allPorts) {
+      const pm = L.circleMarker([p.lat, p.lon], {
+        radius: 4, color: "#38bdf8", weight: 1.2, fillColor: "#38bdf8", fillOpacity: 0.55
+      });
+      pm.bindTooltip(`${p.name} (${p.country}) · ${p.id}`, { direction: "top", offset: [0, -6] });
+      pm.addTo(portsLayer);
+    }
     for (const e of visible) {
       const layers = geometryLayers(e);
       layers.forEach(l => { l.on("click", () => selectEvent(e.event_id)); l.addTo(eventLayer); });
@@ -284,6 +309,27 @@
         m.addTo(eventLayer);
       }
     }
+  }
+
+  const EXP_COLOR = { CRITICAL: "#ef4444", HIGH: "#f59e0b", WATCH: "#38bdf8" };
+  function drawExposureLinks(event) {
+    exposureLayer.clearLayers();
+    const exposure = exposureByEvent.get(event.event_id);
+    if (!exposure || !exposure.ports.length) return;
+    const center = event.latitude != null ? [event.latitude, event.longitude] : null;
+    exposure.ports.forEach(p => {
+      const color = EXP_COLOR[p.exposure] || "#38bdf8";
+      L.circleMarker([p.lat, p.lon], {
+        radius: 6.5, color, weight: 2, fillColor: color, fillOpacity: 0.85
+      }).bindTooltip(`${p.name} · ${p.exposure} · ${p.distance_km} km`, { direction: "top", offset: [0, -8] })
+        .on("click", () => selectEvent(event.event_id))
+        .addTo(exposureLayer);
+      if (center) {
+        L.polyline([center, [p.lat, p.lon]], { color, weight: 1.5, dashArray: "4 4", opacity: 0.65 })
+          .on("click", () => selectEvent(event.event_id))
+          .addTo(exposureLayer);
+      }
+    });
   }
 
   function selectEvent(id) {
@@ -311,6 +357,20 @@
       geomType ? ["Impact zone", geomType + " shown on map"] : null
     ].filter(Boolean);
 
+    const exposure = exposureByEvent.get(id);
+    let exposureHtml = "";
+    if (exposure && exposure.ports.length) {
+      exposureHtml = `
+      <div class="ports-h">Ports potentially exposed · distance screening (${exposure.radius_km} km radius)</div>
+      ${exposure.ports.slice(0, 8).map(p => `
+        <div class="port-row" data-lat="${p.lat}" data-lon="${p.lon}" data-name="${escapeHtml(str(p.name))}">
+          <span class="pe ${p.exposure}">${p.exposure}</span>
+          <span class="pname">${escapeHtml(str(p.name))} <span style="color:var(--muted)">· ${escapeHtml(str(p.country))}</span></span>
+          <span class="pd">${p.distance_km} km</span>
+        </div>`).join("")}
+      ${exposure.ports.length > 8 ? `<div class="more" style="color:var(--muted);font-size:11px;padding-top:5px">+${exposure.ports.length - 8} more ports</div>` : ""}`;
+    }
+
     $("detail").innerHTML = `
       <button class="close" id="dClose" aria-label="Close">×</button>
       <h3>${escapeHtml(str(e.title))}</h3>
@@ -319,13 +379,20 @@
       <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(str(v))}</dd>`).join("")}</dl>
       ${e.description ? `<dl class="kv"><dt>Details</dt><dd>${escapeHtml(str(e.description).replace(/<[^>]*>/g, " "))}</dd></dl>` : ""}
       ${url ? `<a href="${url.replace(/"/g, "&quot;")}" target="_blank" rel="noopener">Open original source report ↗</a>` : ""}
-      <div class="note">Severity shown is an internal display category derived from magnitude or GDACS alert level. It is not an official impact assessment.
+      ${exposureHtml}
+      <div class="note" style="margin-top:10px">Severity shown is an internal display category derived from magnitude or GDACS alert level. It is not an official impact assessment.
       ${geomType ? "Impact geometry (" + geomType + ") provided by source / curated layer and drawn on the map."
                  : "Impact range unknown — point location only."}
       ${e.verification === "CURATED_STATIC" ? " This is a hand-curated static mockup record pending an automated feed." : ""}</div>`;
     $("detail").classList.add("open");
+    $("detail").querySelectorAll(".port-row").forEach(el =>
+      el.addEventListener("click", () =>
+        map.setView([Number(el.dataset.lat), Number(el.dataset.lon)], 9, { animate: true })));
     $("dClose").addEventListener("click", () => { $("detail").classList.remove("open"); selectedId = null;
+      exposureLayer.clearLayers();
       document.querySelectorAll(".event-item").forEach(el => el.classList.remove("selected")); });
+
+    drawExposureLinks(e);
 
     if (e.latitude != null && e.longitude != null && !$("detail").matches(":hover")) {
       map.setView([e.latitude, e.longitude], Math.max(map.getZoom(), 5), { animate: true });
@@ -339,10 +406,27 @@
     $("listUpdated").textContent = "loading…";
     const params = new URLSearchParams({ days: $("days").value, usgsFeed: $("usgsFeed").value });
     try {
-      const res = await fetch("/api/disruptions?" + params.toString());
+      const [res, resEx] = await Promise.all([
+        fetch("/api/disruptions?" + params.toString()),
+        fetch("/api/port-exposure?" + params.toString())
+      ]);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
       rawEvents = data.events || [];
+
+      if (resEx.ok) {
+        const exData = await resEx.json();
+        allPorts = exData.ports || [];
+        exposureByEvent = new Map((exData.exposures || []).map(x => [x.event_id, x]));
+        $("kPorts").textContent = fmt(exData.summary?.unique_exposed_ports ?? 0);
+        $("kPortsSub").textContent = fmt(exData.summary?.events_with_exposure ?? 0) + " events with nearby ports";
+      } else {
+        allPorts = []; exposureByEvent = new Map();
+        $("kPorts").textContent = "—";
+        $("kPortsSub").textContent = "port-exposure endpoint unavailable";
+      }
+
+      if (selectedId && !exposureByEvent.has(selectedId)) exposureLayer.clearLayers();
       render();
 
       const srcEntries = Object.entries(data.sources || {});
@@ -368,6 +452,9 @@
     if ($("autoRefresh").checked) refreshTimer = setInterval(loadData, 5 * 60 * 1000);
   }
 
+  $("togglePorts").addEventListener("change", () => {
+    if ($("togglePorts").checked) portsLayer.addTo(map); else map.removeLayer(portsLayer);
+  });
   $("refresh").addEventListener("click", loadData);
   $("days").addEventListener("change", loadData);
   $("usgsFeed").addEventListener("change", loadData);
