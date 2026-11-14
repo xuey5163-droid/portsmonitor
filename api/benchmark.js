@@ -57,6 +57,7 @@ function makeStats(provider) {
     uniqueVessels: 0,
     vessels: new Map(),
     staticData: new Map(),
+    staticDebug: null,
     errors: [],
     startedAt: new Date().toISOString(),
     endedAt: null
@@ -138,6 +139,13 @@ function consumeAisStream(stats, raw) {
     const dim = r.Dimension || {};
     const length = (Number(dim.A) || 0) + (Number(dim.B) || 0);
     const beam = (Number(dim.C) || 0) + (Number(dim.D) || 0);
+    if (!stats.staticDebug) {
+      stats.staticDebug = {
+        messageKeys: Object.keys(r),
+        metaKeys: Object.keys(meta),
+        sample: JSON.stringify({ meta, r }).slice(0, 800)
+      };
+    }
     addStatic(stats, meta.MMSI ?? r.UserID, {
       name: r.ShipName || meta.ShipName || null,
       shipType: r.ShipType ?? meta.ShipType ?? null,
@@ -222,7 +230,8 @@ function summarize(stats, durationSec) {
     startedAt: stats.startedAt,
     endedAt: stats.endedAt,
     vessels: withType.slice(0, 1000),
-    staticData: [...stats.staticData.values()].slice(0, 3000)
+    staticData: [...stats.staticData.values()].slice(0, 3000),
+    staticDebug: stats.staticDebug
   };
 }
 
