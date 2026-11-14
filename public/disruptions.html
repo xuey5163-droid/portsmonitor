@@ -19,7 +19,7 @@
     .nav a.primary, .nav button.primary { background:#0284c7; border-color:#0284c7; }
     .nav button:disabled { opacity:.5; cursor:not-allowed; }
     main { padding:16px 20px; max-width:1600px; margin:auto; }
-    .kpis { display:grid; grid-template-columns:repeat(6,minmax(0,1fr)); gap:12px; margin-bottom:14px; }
+    .kpis { display:grid; grid-template-columns:repeat(auto-fit,minmax(155px,1fr)); gap:12px; margin-bottom:14px; }
     .kpi { background:var(--panel); border:1px solid var(--line); border-radius:12px; padding:13px 15px; }
     .kpi .value.watch { color:var(--accent); }
     .kpi .name { color:var(--muted); font-size:11px; }
@@ -64,6 +64,12 @@
     .detail a { color:var(--accent); font-size:12px; word-break:break-all; }
     .detail .note { color:var(--muted); font-size:11px; line-height:1.5; border-top:1px solid var(--line); padding-top:10px; }
     .ports-h { font-size:11px; color:var(--muted); margin:2px 0 6px; text-transform:uppercase; letter-spacing:.4px; }
+    .pstat { font-size:10px; font-weight:700; border-radius:20px; padding:2px 9px; display:inline-block; margin-bottom:10px; }
+    .pstat.NORMAL { background:rgba(52,211,153,.15); color:#6ee7b7; border:1px solid rgba(52,211,153,.4); }
+    .pstat.BUSY { background:rgba(250,204,21,.14); color:#fde047; border:1px solid rgba(250,204,21,.4); }
+    .pstat.ELEVATED { background:rgba(249,115,22,.15); color:#fdba74; border:1px solid rgba(249,115,22,.4); }
+    .pstat.SUPPRESSED { background:rgba(239,68,68,.15); color:#fca5a5; border:1px solid rgba(239,68,68,.4); }
+    .pstat.UNKNOWN, .pstat.NO { background:rgba(148,163,184,.12); color:#cbd5e1; border:1px solid rgba(148,163,184,.35); }
     .port-row { display:flex; align-items:center; gap:8px; font-size:12px; padding:5px 0; border-bottom:1px solid rgba(38,54,77,.5); cursor:pointer; }
     .port-row:hover { color:var(--accent); }
     .port-row .pname { flex:1; }
@@ -109,6 +115,7 @@
     <div class="kpi"><div class="name">Earthquakes</div><div class="value" id="kEq">—</div><div class="sub" id="kEqSub">—</div></div>
     <div class="kpi"><div class="name">Conflict &amp; incidents</div><div class="value" id="kStorm">—</div><div class="sub">War / vessel incidents / port disruption</div></div>
     <div class="kpi"><div class="name">Ports potentially exposed</div><div class="value watch" id="kPorts">—</div><div class="sub" id="kPortsSub">—</div></div>
+    <div class="kpi"><div class="name">Ports abnormal</div><div class="value high" id="kAbnormal">—</div><div class="sub" id="kAbnormalSub">elevated / suppressed vs baseline</div></div>
     <div class="kpi"><div class="name">Sources online</div><div class="value" id="kSources">—</div><div class="sub" id="kSourcesSub">—</div></div>
   </section>
 
@@ -174,6 +181,11 @@
         <div><span class="dot UNKNOWN"></span>Unknown / no rating</div>
         <div style="margin-top:4px;border-top:1px solid var(--line);padding-top:4px">Polygons &amp; lines show source-provided impact areas and tracks (cyclone tracks, affected regions, blocked lanes)</div>
         <div><label style="display:flex;align-items:center;gap:6px;margin:0;color:#eef6ff;font-size:11px;"><input type="checkbox" id="togglePorts" checked> Ports layer</label></div>
+        <div style="margin-top:4px;border-top:1px solid var(--line);padding-top:4px">Port activity (PortWatch):
+          <span style="color:#34d399">&#9679;</span> normal
+          <span style="color:#facc15">&#9679;</span> busy
+          <span style="color:#f97316">&#9679;</span> elevated
+          <span style="color:#ef4444">&#9679;</span> suppressed</div>
       </div>
       <aside class="detail" id="detail"></aside>
     </div>
@@ -183,6 +195,7 @@
   Natural-hazard events reported by USGS and GDACS. “Severity” is an internal display category, not an official impact assessment.
   Conflict / incident layer is hand-curated static mockup data (verification: CURATED_STATIC) pending an automated news feed.
   Port exposure is a geographic distance screening only — proximity does not confirm operational impact.
+  Port activity baseline: IMF PortWatch (portwatch.imf.org), weekly updates.
   Sources: Global Disaster Alert and Coordination System (GDACS) · U.S. Geological Survey (USGS).
 </footer>
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -209,6 +222,8 @@
   let rawEvents = [];
   let allPorts = [];
   let exposureByEvent = new Map();
+  let portStatusById = new Map();
+  const PORT_COLOR = { NORMAL:"#34d399", BUSY:"#facc15", ELEVATED:"#f97316", SUPPRESSED:"#ef4444", UNKNOWN:"#64748b" };
   let selectedId = null;
   let refreshTimer = null;
 
@@ -287,10 +302,16 @@
     eventLayer.clearLayers();
     portsLayer.clearLayers();
     for (const p of allPorts) {
+      const st = portStatusById.get(p.id);
+      const color = st ? (PORT_COLOR[st.status] || PORT_COLOR.UNKNOWN) : "#38bdf8";
       const pm = L.circleMarker([p.lat, p.lon], {
-        radius: 4, color: "#38bdf8", weight: 1.2, fillColor: "#38bdf8", fillOpacity: 0.55
+        radius: st ? 5 : 4, color, weight: 1.4, fillColor: color, fillOpacity: 0.6
       });
-      pm.bindTooltip(`${p.name} (${p.country}) · ${p.id}`, { direction: "top", offset: [0, -6] });
+      const tip = st && st.status !== "UNKNOWN"
+        ? `${p.name} (${p.country})\n${st.status} · ${st.ratio}x baseline · ${st.data_last_date} · PortWatch`
+        : `${p.name} (${p.country})` + (st && st.status === "UNKNOWN" ? "\nno PortWatch data" : "");
+      pm.bindTooltip(tip, { direction: "top", offset: [0, -6] });
+      pm.on("click", () => showPortDetail(p.id));
       pm.addTo(portsLayer);
     }
     for (const e of visible) {
@@ -309,6 +330,50 @@
         m.addTo(eventLayer);
       }
     }
+  }
+
+  function sparkline(series, baseline) {
+    if (!series || series.length < 2) return "";
+    const w = 292, h = 64, pad = 4;
+    const max = Math.max(...series.map(s => s.portcalls), baseline || 0, 1);
+    const x = i => pad + i * (w - 2 * pad) / (series.length - 1);
+    const y = v => h - pad - (v / max) * (h - 2 * pad);
+    const pts = series.map((s, i) => `${x(i).toFixed(1)},${y(s.portcalls).toFixed(1)}`).join(" ");
+    const base = baseline != null
+      ? `<line x1="${pad}" y1="${y(baseline)}" x2="${w - pad}" y2="${y(baseline)}" stroke="#91a2ba" stroke-width="1" stroke-dasharray="3 3"/>` : "";
+    return `<svg width="${w}" height="${h}" style="display:block;margin:6px 0 2px"><polyline points="${pts}" fill="none" stroke="#38bdf8" stroke-width="1.5"/>${base}</svg>`;
+  }
+
+  function showPortDetail(id) {
+    const p = allPorts.find(x => x.id === id);
+    if (!p) return;
+    const st = portStatusById.get(id);
+    selectedId = null;
+    $("detail").classList.add("open");
+    document.querySelectorAll(".event-item").forEach(el => el.classList.remove("selected"));
+    exposureLayer.clearLayers();
+
+    const rows = [
+      ["LOCODE", p.id],
+      ["Country", p.country],
+      st && st.status !== "UNKNOWN" ? ["Status", st.status] : null,
+      st && st.ratio != null ? ["Activity ratio", st.ratio + "x of baseline median"] : null,
+      st && st.baseline_median != null ? ["Baseline median", st.baseline_median + " port calls/day"] : null,
+      st && st.current_7d_avg != null ? ["Last 7-day avg", st.current_7d_avg + " port calls/day"] : null,
+      st ? ["Data last date", st.data_last_date || "—"] : null,
+      st && st.pw_portname ? ["PortWatch match", st.pw_portname] : null
+    ].filter(Boolean);
+
+    $("detail").innerHTML = `
+      <button class="close" id="dClose" aria-label="Close">×</button>
+      <h3>${escapeHtml(str(p.name))}</h3>
+      <div class="sub">${p.lat.toFixed(3)}, ${p.lon.toFixed(3)}</div>
+      <div><span class="pstat ${st ? st.status : "NO"}">${st ? st.status : "NO DATA"}</span></div>
+      <dl class="kv">${rows.map(([k, v]) => `<dt>${k}</dt><dd>${escapeHtml(str(v))}</dd>`).join("")}</dl>
+      ${st && st.series && st.series.length > 1 ? `<div class="ports-h">Daily port calls · last ${st.series.length} days</div>${sparkline(st.series, st.baseline_median)}` : ""}
+      <div class="note" style="margin-top:8px">Activity baseline: IMF PortWatch daily port calls (weekly update, ~1 week lag). ELEVATED = far busier than usual; SUPPRESSED = activity collapse, a possible disruption signal. Port-call volume is a congestion proxy, not a direct wait-time measure.</div>`;
+    $("dClose").addEventListener("click", () => { $("detail").classList.remove("open"); });
+    map.setView([p.lat, p.lon], Math.max(map.getZoom(), 6), { animate: true });
   }
 
   const EXP_COLOR = { CRITICAL: "#ef4444", HIGH: "#f59e0b", WATCH: "#38bdf8" };
@@ -406,9 +471,10 @@
     $("listUpdated").textContent = "loading…";
     const params = new URLSearchParams({ days: $("days").value, usgsFeed: $("usgsFeed").value });
     try {
-      const [res, resEx] = await Promise.all([
+      const [res, resEx, resPs] = await Promise.all([
         fetch("/api/disruptions?" + params.toString()),
-        fetch("/api/port-exposure?" + params.toString())
+        fetch("/api/port-exposure?" + params.toString()),
+        fetch("/api/port-status")
       ]);
       if (!res.ok) throw new Error("HTTP " + res.status);
       const data = await res.json();
@@ -424,6 +490,18 @@
         allPorts = []; exposureByEvent = new Map();
         $("kPorts").textContent = "—";
         $("kPortsSub").textContent = "port-exposure endpoint unavailable";
+      }
+
+      if (resPs.ok) {
+        const ps = await resPs.json();
+        portStatusById = new Map((ps.ports || []).map(p => [p.id, p]));
+        const abnormal = (ps.ports || []).filter(p => p.status === "ELEVATED" || p.status === "SUPPRESSED").length;
+        $("kAbnormal").textContent = fmt(abnormal);
+        $("kAbnormalSub").textContent = "PortWatch baseline, data to " + (ps.summary?.data_last_date || "—");
+      } else {
+        portStatusById = new Map();
+        $("kAbnormal").textContent = "—";
+        $("kAbnormalSub").textContent = "port-status endpoint unavailable";
       }
 
       if (selectedId && !exposureByEvent.has(selectedId)) exposureLayer.clearLayers();
