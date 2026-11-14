@@ -38,21 +38,10 @@
 <main>
   <div class="card">
     <div class="row">
-      <div><label for="port">Port / test region</label>
-        <select id="port">
-          <option value="miami">Miami</option>
-          <option value="singapore">Singapore</option>
-          <option value="rotterdam">Rotterdam</option>
-          <option value="shanghai">Shanghai</option>
-          <option value="jebelali">Jebel Ali</option>
-          <option value="losangeles">Los Angeles / Long Beach</option>
-          <option value="newyork">New York / New Jersey</option>
-          <option value="savannah">Savannah</option>
-          <option value="houston">Houston</option>
-          <option value="portsaid">Port Said / Suez</option>
-          <option value="colombo">Colombo</option>
-          <option value="busan">Busan</option>
-        </select>
+      <div style="min-width:260px">
+        <label for="portFilter">Port / test region (type to filter ${'' + PORT_LIST.length + ''} ports)</label>
+        <input class="sinput" type="search" id="portFilter" placeholder="e.g. jeddah, colombo, su…" style="margin:0 0 6px">
+        <select id="port" style="width:100%"></select>
       </div>
       <div><label for="duration">Duration</label>
         <select id="duration">
@@ -79,7 +68,103 @@
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
-  const PORTS = ["miami","singapore","rotterdam","shanghai","jebelali","losangeles","newyork","savannah","houston","portsaid","colombo","busan"];
+  const PORT_LIST = [
+    { k: "cnsha", label: "Shanghai (China)" },
+    { k: "cnngb", label: "Ningbo-Zhoushan (China)" },
+    { k: "cnszx", label: "Shenzhen (Yantian) (China)" },
+    { k: "cnhkg", label: "Hong Kong (China)" },
+    { k: "cntao", label: "Qingdao (China)" },
+    { k: "cntsn", label: "Tianjin (China)" },
+    { k: "krpus", label: "Busan (South Korea)" },
+    { k: "jptyo", label: "Tokyo (Japan)" },
+    { k: "jpyok", label: "Yokohama (Japan)" },
+    { k: "jpukb", label: "Kobe (Japan)" },
+    { k: "twtxg", label: "Kaohsiung (Taiwan)" },
+    { k: "twkel", label: "Keelung (Taiwan)" },
+    { k: "sgsin", label: "Singapore (Singapore)" },
+    { k: "mypkg", label: "Port Klang (Malaysia)" },
+    { k: "mytpp", label: "Tanjung Pelepas (Malaysia)" },
+    { k: "thlch", label: "Laem Chabang (Thailand)" },
+    { k: "vnsgn", label: "Ho Chi Minh City (Cat Lai) (Vietnam)" },
+    { k: "vnhph", label: "Haiphong (Vietnam)" },
+    { k: "idjkt", label: "Jakarta (Tanjung Priok) (Indonesia)" },
+    { k: "phmnl", label: "Manila (Philippines)" },
+    { k: "khkos", label: "Sihanoukville (Cambodia)" },
+    { k: "lkcmb", label: "Colombo (Sri Lanka)" },
+    { k: "innsa", label: "Nhava Sheva (Mumbai) (India)" },
+    { k: "inmaa", label: "Chennai (India)" },
+    { k: "pkkhi", label: "Karachi (Pakistan)" },
+    { k: "bdcgp", label: "Chittagong (Bangladesh)" },
+    { k: "aejea", label: "Jebel Ali (United Arab Emirates)" },
+    { k: "sajed", label: "Jeddah (Saudi Arabia)" },
+    { k: "sadmm", label: "Dammam (Saudi Arabia)" },
+    { k: "qahmd", label: "Hamad (Qatar)" },
+    { k: "bhkbs", label: "Khalifa Bin Salman (Bahrain)" },
+    { k: "omsll", label: "Salalah (Oman)" },
+    { k: "yeade", label: "Aden (Yemen)" },
+    { k: "irbnd", label: "Bandar Abbas (Iran)" },
+    { k: "nlrtm", label: "Rotterdam (Netherlands)" },
+    { k: "beanr", label: "Antwerp (Belgium)" },
+    { k: "deham", label: "Hamburg (Germany)" },
+    { k: "debrv", label: "Bremerhaven (Germany)" },
+    { k: "frleh", label: "Le Havre (France)" },
+    { k: "esvlc", label: "Valencia (Spain)" },
+    { k: "esbcn", label: "Barcelona (Spain)" },
+    { k: "esalg", label: "Algeciras (Spain)" },
+    { k: "itgoa", label: "Genoa (Italy)" },
+    { k: "grpir", label: "Piraeus (Greece)" },
+    { k: "segvx", label: "Gothenburg (Sweden)" },
+    { k: "gbfxt", label: "Felixstowe (United Kingdom)" },
+    { k: "gbsou", label: "Southampton (United Kingdom)" },
+    { k: "plgdn", label: "Gdansk (Poland)" },
+    { k: "rocnd", label: "Constanta (Romania)" },
+    { k: "egaly", label: "Alexandria (Egypt)" },
+    { k: "egpsd", label: "Port Said (Egypt)" },
+    { k: "egdam", label: "Damietta (Egypt)" },
+    { k: "zadur", label: "Durban (South Africa)" },
+    { k: "zacpt", label: "Cape Town (South Africa)" },
+    { k: "ngapp", label: "Lagos (Apapa) (Nigeria)" },
+    { k: "ghtem", label: "Tema (Ghana)" },
+    { k: "macas", label: "Casablanca (Morocco)" },
+    { k: "dzalg", label: "Algiers (Algeria)" },
+    { k: "kemba", label: "Mombasa (Kenya)" },
+    { k: "djjib", label: "Djibouti (Djibouti)" },
+    { k: "uslax", label: "Los Angeles / Long Beach (United States)" },
+    { k: "usoak", label: "Oakland (United States)" },
+    { k: "ussea", label: "Seattle / Tacoma (United States)" },
+    { k: "ussav", label: "Savannah (United States)" },
+    { k: "usnyc", label: "New York / New Jersey (United States)" },
+    { k: "usorf", label: "Norfolk (United States)" },
+    { k: "uschs", label: "Charleston (United States)" },
+    { k: "usmia", label: "Miami (United States)" },
+    { k: "ushou", label: "Houston (United States)" },
+    { k: "brssz", label: "Santos (Brazil)" },
+    { k: "arbue", label: "Buenos Aires (Argentina)" },
+    { k: "pecll", label: "Callao (Peru)" },
+    { k: "clsai", label: "San Antonio (Chile)" },
+    { k: "ecgye", label: "Guayaquil (Ecuador)" },
+    { k: "cobun", label: "Buenaventura (Colombia)" },
+    { k: "pablb", label: "Balboa (Panama)" },
+    { k: "pactn", label: "Colon (Cristobal) (Panama)" },
+    { k: "coctg", label: "Cartagena (Colombia)" },
+    { k: "jmkin", label: "Kingston (Jamaica)" },
+    { k: "mxver", label: "Veracruz (Mexico)" },
+    { k: "ausyd", label: "Sydney (Australia)" },
+    { k: "aumel", label: "Melbourne (Australia)" },
+    { k: "aufre", label: "Fremantle (Australia)" },
+    { k: "nzakl", label: "Auckland (New Zealand)" }
+  ];
+  const PORTS = PORT_LIST.map(p => p.k);
+
+  function fillPorts(q) {
+    const sel = $("port");
+    const query = (q || "").trim().toLowerCase();
+    const list = PORT_LIST.filter(p => !query || (p.k + " " + p.label).toLowerCase().includes(query));
+    sel.innerHTML = list.map(p => `<option value="${p.k}">${p.label}</option>`).join("");
+    if (!list.length) sel.innerHTML = `<option value="">no match</option>`;
+  }
+  fillPorts("");
+  $("portFilter").addEventListener("input", () => fillPorts($("portFilter").value));
   const key = (p) => "pw_snapshot_" + p;
 
   function classifyShip(t) {
