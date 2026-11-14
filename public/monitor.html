@@ -111,7 +111,7 @@
       <div class="sec-h">Ports
         <div class="pfilters" id="pFilters">
           <button data-f="all" class="on">All</button>
-          <button data-f="congested">Congested</button>
+          <button data-f="congested">Abnormal</button>
           <button data-f="exposed">Exposed</button>
           <button data-f="data">With data</button>
         </div>
@@ -122,6 +122,16 @@
 
     <section class="sec events">
       <div class="sec-h">Disruption events</div>
+      <div style="display:flex;gap:6px;margin:0 16px 6px">
+        <select class="sinput" id="eSev" style="flex:1;margin:0">
+          <option value="">All severity</option>
+          <option value="HIGH">High</option>
+          <option value="MEDIUM">Medium</option>
+          <option value="LOW">Low</option>
+          <option value="UNKNOWN">Unknown</option>
+        </select>
+        <label style="display:flex;gap:4px;align-items:center;margin:0;color:#e8eef7;font-size:11px;white-space:nowrap"><input type="checkbox" id="eExposed"> Near ports</label>
+      </div>
       <select class="sinput" id="eType">
         <option value="">All types</option>
         <option value="EARTHQUAKE">Earthquake</option>
@@ -184,7 +194,7 @@
   const TYPE_COLOR = { CARGO:"#22c55e", TANKER:"#ef4444", PASSENGER:"#3b82f6", FISHING:"#b45309",
     HIGH_SPEED:"#eab308", OTHER:"#eab308", UNKNOWN:"#38bdf8" };
   const PORT_COLOR = { NORMAL:"#34d399", BUSY:"#facc15", ELEVATED:"#f97316", SUPPRESSED:"#ef4444", UNKNOWN:"#64748b" };
-  const SNAPSHOT_PORTS = ["miami","singapore","rotterdam","shanghai","jebelali","losangeles","newyork","savannah","houston","portsaid","colombo","busan"];
+  const SNAPSHOT_PORTS = ["cnsha","cnngb","cnszx","cnhkg","cntao","cntsn","krpus","jptyo","jpyok","jpukb","twtxg","twkel","sgsin","mypkg","mytpp","thlch","vnsgn","vnhph","idjkt","phmnl","khkos","lkcmb","innsa","inmaa","pkkhi","bdcgp","aejea","sajed","sadmm","qahmd","bhkbs","omsll","yeade","irbnd","nlrtm","beanr","deham","debrv","frleh","esvlc","esbcn","esalg","itgoa","grpir","segvx","gbfxt","gbsou","plgdn","rocnd","egaly","egpsd","egdam","zadur","zacpt","ngapp","ghtem","macas","dzalg","kemba","djjib","uslax","usoak","ussea","ussav","usnyc","usorf","uschs","usmia","ushou","brssz","arbue","pecll","clsai","ecgye","cobun","pablb","pactn","coctg","jmkin","mxver","ausyd","aumel","aufre","nzakl"];
 
   const map = L.map("map", { worldCopyJump:true, zoomControl:true }).setView([25, 60], 3);
   L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
@@ -371,6 +381,10 @@
       ${st && st.series && st.series.length > 1 ? `<div class="ports-h">Daily port calls · last ${st.series.length} days (PortWatch)</div>${sparkline(st.series, st.baseline_median)}` : ""}
       ${exp.length ? `<div class="ports-h">Disruption exposure · distance screening</div>` + exp.slice(0,8).map(e =>
         `<div class="port-row" data-eid="${e.event_id}"><span class="pe ${e.exposure}">${e.exposure}</span><span class="pname">${esc(e.title)}</span><span class="pd">${e.distance_km} km</span></div>`).join("") : ""}
+      ${st && st.status !== "UNKNOWN" ? `<div class="note" style="margin-top:8px"><b style="color:#e8eef7">Why flagged:</b> ${st.status === "SUPPRESSED"
+          ? "vessel calls have fallen to " + st.ratio + "x the typical level — possible disruption, reduced traffic, seasonality, or data noise. Cause requires event/news verification."
+          : "vessel calls are at " + st.ratio + "x the typical level — heavier than usual traffic, possible congestion or seasonal surge."}
+        ${st.baseline_median != null && st.baseline_median < 5 ? `<br><b style="color:#fcd34d">Low-volume port:</b> baseline is only ${st.baseline_median} calls/day, so a change of 1-2 ships flips the status — treat as a weak signal.` : ""}</div>` : ""}
       <div class="note" style="margin-top:8px">Baseline: IMF PortWatch (weekly). Exposure: geographic screening only — proximity does not confirm operational impact. Snapshot: short AIS sample, not continuous coverage.</div>`;
     $("detail").classList.add("open");
     $("dClose").onclick = closeDetail;
@@ -383,8 +397,12 @@
   function renderEvents() {
     const q = $("eSearch").value.trim().toLowerCase();
     const tf = $("eType").value;
+    const sf = $("eSev").value;
+    const onlyExposed = $("eExposed").checked;
     const list = rawEvents.filter(e =>
       (!tf || e.event_type === tf) &&
+      (!sf || e.severity === sf) &&
+      (!onlyExposed || exposureByEvent.has(e.event_id)) &&
       (!q || (e.title + " " + (e.affected_countries || "") + (TYPE_LABEL[e.event_type] || "")).toLowerCase().includes(q)));
     $("eventRows").innerHTML = list.map(e => `
       <div class="row-item ${selected && selected.kind === "event" && selected.id === e.event_id ? "selected" : ""}" data-eid="${e.event_id}">
@@ -509,6 +527,8 @@
   $("pSearch").addEventListener("input", renderPorts);
   $("eSearch").addEventListener("input", renderEvents);
   $("eType").addEventListener("change", renderEvents);
+  $("eSev").addEventListener("change", renderEvents);
+  $("eExposed").addEventListener("change", renderEvents);
   $("vType").addEventListener("change", renderVessels);
   $("tVessels").addEventListener("change", renderVessels);
   $("tPorts").addEventListener("change", renderPortsLayer);
