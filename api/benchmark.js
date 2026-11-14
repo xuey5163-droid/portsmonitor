@@ -147,11 +147,11 @@ function consumeAisStream(stats, raw) {
       };
     }
     addStatic(stats, meta.MMSI ?? r.UserID, {
-      name: r.ShipName || meta.ShipName || null,
-      shipType: r.ShipType ?? meta.ShipType ?? null,
+      name: (r.Name || r.ShipName || meta.ShipName || "").trim() || null,
+      shipType: r.Type ?? r.ShipType ?? meta.ShipType ?? null,
       shipTypeText: r.ShipTypeText || meta.ShipTypeText || null,
-      destination: r.Destination || null,
-      draught: r.MaximumDraught ?? null,
+      destination: (r.Destination || "").trim() || null,
+      draught: r.MaximumStaticDraught ?? r.MaximumDraught ?? null,
       length_m: length > 0 ? length : null,
       beam_m: beam > 0 ? beam : null
     });
@@ -188,6 +188,13 @@ function consumeOpenWaters(stats, raw) {
   }
 
   if (!event || event.type !== "event") return;
+
+  if (!stats.staticDebug) {
+    stats.staticDebug = {
+      eventKeys: Object.keys(event),
+      sample: JSON.stringify(event).slice(0, 800)
+    };
+  }
 
   // opportunistically capture ship type if the payload provides it
   addStatic(stats, event.mmsi, {
