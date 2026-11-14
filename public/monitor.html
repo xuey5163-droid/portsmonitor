@@ -187,8 +187,9 @@
   const SNAPSHOT_PORTS = ["miami","singapore","rotterdam","shanghai","jebelali","losangeles","newyork","savannah","houston","portsaid","colombo","busan"];
 
   const map = L.map("map", { worldCopyJump:true, zoomControl:true }).setView([25, 60], 3);
-  L.tileLayer("https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png", {
-    maxZoom: 19, attribution: "&copy; OpenStreetMap &copy; CARTO"
+  L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}", {
+    maxZoom: 19,
+    attribution: "Esri, Garmin, USGS, EPA, USDA | &copy; OpenStreetMap contributors"
   }).addTo(map);
 
   const vesselsLayer = L.layerGroup().addTo(map);
