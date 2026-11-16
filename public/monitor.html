@@ -214,52 +214,80 @@
   let portFilter = "all";
 
   /* ---------------- data ---------------- */
+  function refreshUI() {
+    renderPorts();
+    renderPortsLayer();
+  }
+
   async function loadAll() {
-    const res = await fetch("/api/disruptions?days=30&usgsFeed=magnitude45");
-    const data = await res.json();
-    rawEvents = data.events || [];
-    $("kEvents").textContent = fmt(rawEvents.length);
-
+    // events first — never block the map on the slowest endpoint
     try {
-      const ex = await (await fetch("/api/port-exposure?days=30&usgsFeed=magnitude45")).json();
-      allPorts = ex.ports || [];
-      exposureByEvent = new Map((ex.exposures || []).map(x => [x.event_id, x]));
-      const byPort = new Map();
-      for (const x of (ex.exposures || [])) for (const p of x.ports) {
-        if (!byPort.has(p.id)) byPort.set(p.id, []);
-        byPort.get(p.id).push({ event_id: x.event_id, exposure: p.exposure, distance_km: p.distance_km, title: x.title, severity: x.severity, status: x.status });
-      }
-      exposureByPort = byPort;
-      $("kExposed").textContent = fmt(byPort.size);
+      const res = await fetch("/api/disruptions?days=30&usgsFeed=magnitude45");
+      const data = await res.json();
+      rawEvents = data.events || [];
+      $("kEvents").textContent = fmt(rawEvents.length);
     } catch {}
+    renderEvents();
+    renderEventsLayer();
 
-    let ps = null;
-    for (let attempt = 0; attempt < 2 && !ps; attempt++) {
+    // port exposure (ports list + screening)
+    (async () => {
       try {
-        const r = await fetch("/api/port-status");
-        if (r.ok) ps = await r.json();
+        const ex = await (await fetch("/api/port-exposure?days=30&usgsFeed=magnitude45")).json();
+        allPorts = ex.ports || [];
+        exposureByEvent = new Map((ex.exposures || []).map(x => [x.event_id, x]));
+        const byPort = new Map();
+        for (const x of (ex.exposures || [])) for (const p of x.ports) {
+          if (!byPort.has(p.id)) byPort.set(p.id, []);
+          byPort.get(p.id).push({ event_id: x.event_id, exposure: p.exposure, distance_km: p.distance_km, title: x.title, severity: x.severity, status: x.status });
+        }
+        exposureByPort = byPort;
+        $("kExposed").textContent = fmt(byPort.size);
       } catch {}
-      if (!ps) await new Promise(res => setTimeout(res, 3000));
-    }
-    if (ps) {
-      portStatusById = new Map((ps.ports || []).map(p => [p.id, p]));
-      $("kAbnormal").textContent = fmt((ps.ports || []).filter(p => p.status === "ELEVATED" || p.status === "SUPPRESSED").length);
-    }
+      refreshUI();
+    })();
 
-    // vessel snapshots (optional)
-    const snaps = await Promise.all(SNAPSHOT_PORTS.map(async (k) => {
-      try { const r = await fetch(`/data/snapshot-${k}.json`, { cache:"no-store" }); if (!r.ok) return null; return await r.json(); }
-      catch { return null; }
-    }));
-    for (const s of snaps) if (s) {
-      snapshotByCenter.push(s);
-      for (const v of (s.vessels || [])) allVessels.push({ ...v, _port: s.port, _center: s.center });
-    }
-    $("kVessels").textContent = fmt(allVessels.length);
+    // port baseline status — fully async, retries in background
+    (async () => {
+      let ps = null;
+      for (let attempt = 0; attempt < 2 && !ps; attempt++) {
+        try {
+          const r = await fetch("/api/port-status");
+          if (r.ok) ps = await r.json();
+        } catch {}
+        if (!ps) await new Promise(res => setTimeout(res, 3000));
+      }
+      if (ps) {
+        portStatusById = new Map((ps.ports || []).map(p => [p.id, p]));
+        $("kAbnormal").textContent = fmt((ps.ports || []).filter(p => p.status === "ELEVATED" || p.status === "SUPPRESSED").length);
+        refreshUI();
+      }
+    })();
 
-    renderPorts(); renderEvents(); renderPortsLayer(); renderVessels(); renderEventsLayer();
-    const ab = allPorts.find(p => { const st = portStatusById.get(p.id); return st && (st.status === "ELEVATED" || st.status === "SUPPRESSED"); });
-    if (ab) selectPort(ab.id, false); else if (rawEvents.length) selectEvent(rawEvents[0].event_id, false);
+    // vessel snapshots — async
+    (async () => {
+      const snaps = await Promise.all(SNAPSHOT_PORTS.map(async (k) => {
+        try { const r = await fetch(`/data/snapshot-${k}.json`, { cache: "no-store" }); if (!r.ok) return null; return await r.json(); }
+        catch { return null; }
+      }));
+      for (const s of snaps) if (s) {
+        snapshotByCenter.push(s);
+        for (const v of (s.vessels || [])) allVessels.push({ ...v, _port: s.port, _center: s.center });
+      }
+      $("kVessels").textContent = fmt(allVessels.length);
+      renderVessels();
+      refreshUI();
+    })();
+
+    // auto-select something interesting once events are in
+    const trySelect = setInterval(() => {
+      if (rawEvents.length) {
+        const ab = allPorts.find(p => { const st = portStatusById.get(p.id); return st && (st.status === "ELEVATED" || st.status === "SUPPRESSED"); });
+        if (ab) selectPort(ab.id, false); else selectEvent(rawEvents[0].event_id, false);
+        clearInterval(trySelect);
+      }
+    }, 500);
+    setTimeout(() => clearInterval(trySelect), 15000);
   }
 
   /* ---------------- vessels ---------------- */
